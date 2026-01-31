@@ -48,9 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Improved error messages for common user mistakes (closes #140)
-  - No more stack traces when passing wrong file types (e.g., `.gpkg` to parquet commands)
-  - Clear, actionable error messages with hints for fixing the issue
-  - Added defensive checks to prevent `AttributeError` on missing output files
+  - Using a .gpkg file with `gpio add` commands now shows:
+    "Not a valid Parquet file... Hint: Use 'gpio convert geoparquet' to convert other formats"
+  - Previously showed full stack trace with `duckdb.InvalidInputException`
+  - Error handling applied to all commands using `GlobAwareCommand` and `SingleFileCommand`
 
 ### Internal
 

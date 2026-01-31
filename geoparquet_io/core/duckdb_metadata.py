@@ -63,6 +63,9 @@ def get_kv_metadata(parquet_file: str, con=None) -> dict[bytes, bytes]:
     Extract key-value metadata using parquet_kv_metadata().
 
     Returns dict like {b'geo': b'{"version": "1.1.0", ...}'}
+
+    Raises:
+        GeoParquetError: If file is not a valid Parquet file or cannot be read.
     """
     safe_url = _safe_url(parquet_file)
     connection, should_close = _get_connection_for_file(parquet_file, con)
@@ -83,6 +86,19 @@ def get_kv_metadata(parquet_file: str, con=None) -> dict[bytes, bytes]:
             if key_bytes:
                 kv_dict[key_bytes] = val_bytes
         return kv_dict
+    except duckdb.InvalidInputException as e:
+        # File is not a valid Parquet file (e.g., wrong format, corrupt)
+        error_msg = str(e)
+        if "No magic bytes found" in error_msg or "not a parquet file" in error_msg.lower():
+            raise GeoParquetError(
+                f"Not a valid Parquet file: {parquet_file}\n"
+                f"This command requires .parquet files with valid Parquet format.\n"
+                f"Hint: Use 'gpio convert geoparquet' to convert other formats."
+            ) from e
+        raise GeoParquetError(f"Invalid Parquet file: {parquet_file}\n{error_msg}") from e
+    except duckdb.IOException as e:
+        # File not found, permission denied, or other I/O error
+        raise GeoParquetError(f"Cannot read file: {parquet_file}\n{str(e)}") from e
     finally:
         if should_close:
             connection.close()

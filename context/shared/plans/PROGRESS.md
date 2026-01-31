@@ -10,8 +10,8 @@
 | PR1 | C4: Remove deprecated commands | ✅ Complete | PR #174 - Merged | Issue #154 (M4/Issue #115 was already fixed) |
 | PR2 | C1: Refactor inspect_legacy | ✅ Complete | PR #176 - Merged | Grade E → C (removed deprecated code) |
 | PR3 | C2: Test coverage 75%+ | ✅ Complete | PR #178 - Merged | 67.0% → 68.54% (target: 75%+ not reached, but meaningful progress) |
-| PR4 | C3: CLI consistency (partial) | 🔍 PR Open - Awaiting Review | PR #192 | Issue #120 (partial), #150. Added --show-sql, --verbose, progress, renamed --profile→--aws-profile |
-| PR5 | H1 + H3: Error handling + profile cleanup | ⏸️ Partial (H3 done in PR4) | - | H3 complete in PR4. H1 (#140) remains |
+| PR4 | C3: CLI consistency (partial) | ✅ Complete | PR #192 - Merged | Issue #120 (partial), #150. Added --show-sql, --verbose, progress, renamed --profile→--aws-profile |
+| PR5 | H1: Error handling | 🔄 In progress | - | Issue #140. User-friendly error messages for invalid file types |
 | PR6 | H2: Grade D refactoring (top 3) | ⏳ Not started | - | extract, convert, inspect |
 | PR7 | Docs audit (optional) | ⏳ Not started | - | If time permits |
 
@@ -58,7 +58,7 @@
     Further improvement requires systematic testing of external dependencies.
 
 ### 2026-01-27
-- **PR4 Completed** (PR #192 - Awaiting Review):
+- **PR4 Completed** (PR #192 - Merged):
   - Added `--show-sql` to all DuckDB commands (add, partition, sort, extract arcgis)
   - Added `--verbose` to 6 missing commands (inspect subcommands, publish upload)
   - Added progress reporting to 3 commands (add h3, add quadkey, sort column)
@@ -69,3 +69,13 @@
   - Created issue #191 for --overwrite standardization (deferred to separate PR)
   - All 1412 tests passing, 68% coverage maintained
   - CHANGELOG.md updated with all changes
+
+### 2026-01-31
+- **PR5 In Progress** (Branch: cleanup/pr5-error-handling):
+  - Added error handling to `get_kv_metadata()` in `duckdb_metadata.py`
+  - Added `invoke()` override to `GlobAwareCommand` class to catch `GeoParquetError`
+  - Now shows user-friendly error messages for invalid Parquet files (e.g., using .gpkg with add commands)
+  - Before: Full stack trace with `duckdb.InvalidInputException`
+  - After: Clean error message with hint to use `gpio convert`
+  - Added 4 new tests for error handling (2 in test_duckdb_metadata.py, 2 in test_add.py)
+  - Addresses issue #140 (unsightly stack trace)

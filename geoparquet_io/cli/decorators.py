@@ -5,9 +5,32 @@ This module provides reusable decorators to ensure consistency across commands
 and reduce code duplication.
 """
 
+import functools
+
 import click
 
 from geoparquet_io.core.common import ParquetWriteSettings
+
+
+def handle_geoparquet_errors(func):
+    """
+    Decorator to convert GeoParquetError exceptions to user-friendly Click errors.
+
+    Catches GeoParquetError from core functions and converts them to
+    click.ClickException for clean error display without stack traces.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        # Import here to avoid circular imports
+        from geoparquet_io.core.duckdb_metadata import GeoParquetError
+
+        try:
+            return func(*args, **kwargs)
+        except GeoParquetError as e:
+            raise click.ClickException(str(e)) from None
+
+    return wrapper
 
 
 def parse_row_group_options(
@@ -370,6 +393,9 @@ class GlobAwareCommand(click.Command):
     For commands that support glob patterns (like extract), it suggests quoting.
     For commands that don't (like convert), it suggests using gpio extract first.
 
+    This class also handles GeoParquetError exceptions from core functions,
+    converting them to user-friendly Click exceptions without stack traces.
+
     Usage:
         @cli.command(cls=GlobAwareCommand)
         def my_command(...):
@@ -392,6 +418,16 @@ class GlobAwareCommand(click.Command):
         "extract": "geoparquet",
         "inspect": "summary",
     }
+
+    def invoke(self, ctx):
+        """Invoke the command with user-friendly error handling."""
+        # Import here to avoid circular imports
+        from geoparquet_io.core.duckdb_metadata import GeoParquetError
+
+        try:
+            return super().invoke(ctx)
+        except GeoParquetError as e:
+            raise click.ClickException(str(e)) from None
 
     def make_context(self, info_name, args, parent=None, **extra):
         """Detect shell-expanded glob patterns and provide helpful errors."""

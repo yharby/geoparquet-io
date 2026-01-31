@@ -447,3 +447,35 @@ class TestRemoteWriteSupport:
             assert source_path.endswith(".parquet")
             # Destination should be the remote URL
             assert call_args[1]["destination"] == remote_output
+
+
+class TestAddCommandErrorHandling:
+    """Tests for user-friendly error handling in add commands."""
+
+    def test_add_bbox_with_gpkg_shows_friendly_error(self, tmp_path):
+        """Test that using a .gpkg file shows a friendly error, not a stack trace."""
+        # Create a fake gpkg file (not a valid parquet)
+        gpkg_file = tmp_path / "test.gpkg"
+        gpkg_file.write_text("Not a parquet file")
+
+        runner = CliRunner()
+        result = runner.invoke(add, ["bbox", str(gpkg_file)])
+
+        # Should fail with exit code 1
+        assert result.exit_code == 1
+
+        # Should show friendly error message, not a stack trace
+        assert "Traceback" not in result.output
+        assert "Not a valid Parquet file" in result.output
+        assert "gpio convert" in result.output
+
+    def test_add_bbox_with_nonexistent_file_shows_friendly_error(self):
+        """Test that using a nonexistent file shows a friendly error."""
+        runner = CliRunner()
+        result = runner.invoke(add, ["bbox", "/nonexistent/path/file.parquet"])
+
+        # Should fail
+        assert result.exit_code != 0
+
+        # Should show friendly error message
+        assert "Traceback" not in result.output

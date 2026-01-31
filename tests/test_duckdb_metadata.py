@@ -373,3 +373,53 @@ class TestGeoParquetErrorExceptions:
         import click
 
         assert not issubclass(GeoParquetError, click.ClickException)
+
+    def test_get_kv_metadata_raises_error_for_invalid_parquet(self):
+        """Test that get_kv_metadata raises GeoParquetError for invalid files."""
+        # Create a temporary non-parquet file
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".parquet", delete=False) as f:
+            f.write("This is not a parquet file")
+            temp_path = f.name
+
+        try:
+            with pytest.raises(GeoParquetError) as exc_info:
+                get_kv_metadata(temp_path)
+
+            # Verify error message is informative
+            error_msg = str(exc_info.value)
+            assert "Not a valid Parquet file" in error_msg
+            assert temp_path in error_msg
+            assert "gpio convert" in error_msg
+
+            # Verify the original exception is chained
+            assert exc_info.value.__cause__ is not None
+        finally:
+            # Clean up
+            Path(temp_path).unlink(missing_ok=True)
+
+    def test_get_kv_metadata_raises_error_for_io_error(self):
+        """Test that get_kv_metadata raises GeoParquetError for I/O errors."""
+        # Create an incomplete parquet file
+        with tempfile.NamedTemporaryFile(mode="wb", suffix=".parquet", delete=False) as f:
+            # Write just a few bytes - not a complete parquet file structure
+            f.write(b"PAR1")  # Parquet magic number but incomplete
+            temp_path = f.name
+
+        try:
+            with pytest.raises(GeoParquetError) as exc_info:
+                get_kv_metadata(temp_path)
+
+            # Verify error message mentions read issue or invalid parquet
+            error_msg = str(exc_info.value)
+            assert (
+                "Cannot read file" in error_msg
+                or "Not a valid Parquet file" in error_msg
+                or "Invalid Parquet file" in error_msg
+            )
+            assert temp_path in error_msg
+
+            # Verify the original exception is chained
+            assert exc_info.value.__cause__ is not None
+        finally:
+            # Clean up
+            Path(temp_path).unlink(missing_ok=True)
