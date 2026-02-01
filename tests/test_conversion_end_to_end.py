@@ -20,6 +20,7 @@ import pytest
 from click.testing import CliRunner
 
 from geoparquet_io.cli.main import cli
+from geoparquet_io.core.check_parquet_structure import check_all
 from geoparquet_io.core.convert import convert_to_geoparquet
 from tests.conftest import (
     get_geoparquet_version,
@@ -28,6 +29,28 @@ from tests.conftest import (
 )
 
 # Helper functions
+
+
+def _check_all_passed(results: dict, allow_outdated_version: bool = False) -> bool:
+    """Check if all check_all sub-checks passed.
+
+    Args:
+        results: Results dict from check_all()
+        allow_outdated_version: If True, ignore "outdated version" issues in bbox check.
+            Use this when testing intentional conversion to older GeoParquet versions.
+    """
+    for key, result in results.items():
+        if not isinstance(result, dict):
+            continue
+        if not result.get("passed", True):
+            # If we allow outdated version and the only issue is "outdated", that's OK
+            if allow_outdated_version and key == "bbox":
+                issues = result.get("issues", [])
+                non_version_issues = [i for i in issues if "outdated" not in i.lower()]
+                if not non_version_issues:
+                    continue  # Only version issue, skip this failure
+            return False
+    return True
 
 
 def get_parquet_type_crs(parquet_file):
@@ -127,6 +150,14 @@ class TestGeoJSONConversions:
         # Verify data integrity
         assert verify_duckdb_readable(temp_output_file)
 
+        # Verify output passes check_all validation
+        # Allow outdated version for v1.0 tests (intentional legacy format testing)
+        results = check_all(temp_output_file, return_results=True, quiet=True)
+        allow_outdated = version == "1.0"
+        assert _check_all_passed(results, allow_outdated_version=allow_outdated), (
+            f"Output failed check_all: {results}"
+        )
+
 
 @pytest.mark.slow
 class TestGPKGConversions:
@@ -145,6 +176,13 @@ class TestGPKGConversions:
 
         assert os.path.exists(temp_output_file)
         assert verify_duckdb_readable(temp_output_file)
+
+        # Verify output passes check_all validation
+        results = check_all(temp_output_file, return_results=True, quiet=True)
+        allow_outdated = version == "1.0"
+        assert _check_all_passed(results, allow_outdated_version=allow_outdated), (
+            f"Output failed check_all: {results}"
+        )
 
     @pytest.mark.parametrize("version", ["1.0", "1.1", "2.0", "parquet-geo-only"])
     def test_gpkg_with_crs_6933_to_version(self, buildings_gpkg_6933, temp_output_file, version):
@@ -203,6 +241,13 @@ class TestShapefileConversions:
         assert os.path.exists(temp_output_file)
         assert verify_duckdb_readable(temp_output_file)
 
+        # Verify output passes check_all validation
+        results = check_all(temp_output_file, return_results=True, quiet=True)
+        allow_outdated = version == "1.0"
+        assert _check_all_passed(results, allow_outdated_version=allow_outdated), (
+            f"Output failed check_all: {results}"
+        )
+
 
 class TestCSVConversions:
     """Test CSV (WKT) to all GeoParquet versions."""
@@ -220,6 +265,13 @@ class TestCSVConversions:
 
         assert os.path.exists(temp_output_file)
         assert verify_duckdb_readable(temp_output_file)
+
+        # Verify output passes check_all validation
+        results = check_all(temp_output_file, return_results=True, quiet=True)
+        allow_outdated = version == "1.0"
+        assert _check_all_passed(results, allow_outdated_version=allow_outdated), (
+            f"Output failed check_all: {results}"
+        )
 
     @pytest.mark.parametrize("version", ["1.0", "1.1", "2.0", "parquet-geo-only"])
     def test_csv_with_crs_to_version(self, csv_points_wkt, temp_output_file, version):

@@ -19,12 +19,18 @@ from click.testing import CliRunner
 
 from geoparquet_io.cli.main import cli
 from geoparquet_io.core.check_parquet_structure import (
+    check_all,
     check_bbox_structure,
     get_compression_info,
     get_row_group_stats,
 )
 from geoparquet_io.core.common import get_parquet_metadata, parse_geo_metadata
 from geoparquet_io.core.convert import convert_to_geoparquet
+
+
+def _check_all_passed(results: dict) -> bool:
+    """Check if all check_all sub-checks passed."""
+    return all(r.get("passed", True) for r in results.values() if isinstance(r, dict))
 
 
 @pytest.fixture
@@ -121,6 +127,10 @@ class TestConvertCore:
         assert os.path.exists(temp_output_file)
         assert os.path.getsize(temp_output_file) > 0
 
+        # Verify output passes check_all validation
+        results = check_all(temp_output_file, return_results=True, quiet=True)
+        assert _check_all_passed(results), f"Output failed check_all: {results}"
+
     def test_convert_geojson(self, geojson_input, temp_output_file):
         """Test conversion from GeoJSON."""
         convert_to_geoparquet(
@@ -133,6 +143,10 @@ class TestConvertCore:
         assert os.path.exists(temp_output_file)
         assert os.path.getsize(temp_output_file) > 0
 
+        # Verify output passes check_all validation
+        results = check_all(temp_output_file, return_results=True, quiet=True)
+        assert _check_all_passed(results), f"Output failed check_all: {results}"
+
     def test_convert_geopackage(self, geopackage_input, temp_output_file):
         """Test conversion from GeoPackage."""
         convert_to_geoparquet(
@@ -144,6 +158,10 @@ class TestConvertCore:
 
         assert os.path.exists(temp_output_file)
         assert os.path.getsize(temp_output_file) > 0
+
+        # Verify output passes check_all validation
+        results = check_all(temp_output_file, return_results=True, quiet=True)
+        assert _check_all_passed(results), f"Output failed check_all: {results}"
 
     def test_convert_skip_hilbert(self, shapefile_input, temp_output_file):
         """Test conversion with --skip-hilbert flag."""
@@ -188,6 +206,10 @@ class TestConvertCore:
         # Check that geometry column has ZSTD compression
         geom_compression = compression_info.get("geometry")
         assert geom_compression == "ZSTD"
+
+        # Verify output passes check_all validation
+        results = check_all(temp_output_file, return_results=True, quiet=True)
+        assert _check_all_passed(results), f"Output failed check_all: {results}"
 
     def test_convert_invalid_input(self, temp_output_file):
         """Test error handling for missing input file."""
@@ -467,6 +489,10 @@ class TestConvertCSVCore:
         assert result is not None
         con.close()
 
+        # Verify output passes check_all validation
+        results = check_all(temp_output_file, return_results=True, quiet=True)
+        assert _check_all_passed(results), f"Output failed check_all: {results}"
+
     def test_convert_csv_geometry_column(self, csv_geometry_input, temp_output_file):
         """Test CSV with 'geometry' column name is auto-detected."""
         convert_to_geoparquet(csv_geometry_input, temp_output_file, verbose=False)
@@ -493,6 +519,10 @@ class TestConvertCSVCore:
         ).fetchone()
         assert "POINT" in result[0]
         con.close()
+
+        # Verify output passes check_all validation
+        results = check_all(temp_output_file, return_results=True, quiet=True)
+        assert _check_all_passed(results), f"Output failed check_all: {results}"
 
     def test_convert_csv_latitude_longitude_columns(
         self, csv_latitude_longitude_input, temp_output_file
