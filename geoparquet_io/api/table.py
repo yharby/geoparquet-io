@@ -1142,6 +1142,30 @@ class Table:
         )
         return Table(result, self._geometry_column)
 
+    def add_a5(
+        self,
+        column_name: str = "a5_cell",
+        resolution: int = 15,
+    ) -> Table:
+        """
+        Add an A5 cell column based on geometry location.
+
+        Args:
+            column_name: Name for the A5 column (default: 'a5_cell')
+            resolution: A5 resolution level 0-30 (default: 15)
+
+        Returns:
+            New Table with A5 column added
+        """
+        from geoparquet_io.core.add_a5_column import add_a5_table
+
+        result = add_a5_table(
+            self._table,
+            a5_column_name=column_name,
+            resolution=resolution,
+        )
+        return Table(result, self._geometry_column)
+
     def add_kdtree(
         self,
         column_name: str = "kdtree_cell",

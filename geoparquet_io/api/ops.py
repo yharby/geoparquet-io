@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import pyarrow as pa
 
+from geoparquet_io.core.add_a5_column import add_a5_table
 from geoparquet_io.core.add_bbox_column import add_bbox_table
 from geoparquet_io.core.add_h3_column import add_h3_table
 from geoparquet_io.core.add_kdtree_column import add_kdtree_table
@@ -158,6 +159,32 @@ def add_h3(
     return add_h3_table(
         table,
         h3_column_name=column_name,
+        resolution=resolution,
+        geometry_column=geometry_column,
+    )
+
+
+def add_a5(
+    table: pa.Table,
+    column_name: str = "a5_cell",
+    resolution: int = 15,
+    geometry_column: str | None = None,
+) -> pa.Table:
+    """
+    Add an A5 cell column based on geometry location.
+
+    Args:
+        table: Input PyArrow Table
+        column_name: Name for the A5 column (default: 'a5_cell')
+        resolution: A5 resolution level 0-30 (default: 15)
+        geometry_column: Geometry column name (auto-detected if None)
+
+    Returns:
+        New table with A5 column added
+    """
+    return add_a5_table(
+        table,
+        a5_column_name=column_name,
         resolution=resolution,
         geometry_column=geometry_column,
     )
