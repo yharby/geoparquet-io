@@ -66,23 +66,31 @@ def _get_srs_parameter(input_path: str, verbose: bool = False) -> str | None:
     """
     Extract CRS from GeoParquet and format for DuckDB GDAL SRS parameter.
 
+    IMPORTANT: Always returns an explicit CRS string for GDAL formats.
+    GDAL-based formats (Shapefile, FlatGeobuf, GeoPackage) don't have implicit
+    CRS defaults - they require explicit CRS metadata to be written.
+
     Priority:
-    1. Extract EPSG code if available (e.g., "EPSG:4326")
-    2. Fall back to serialized PROJJSON string
-    3. Return None if no CRS or default CRS
+    1. For default CRS (None, EPSG:4326, OGC:CRS84), return "EPSG:4326"
+    2. Extract EPSG code if available (e.g., "EPSG:5070")
+    3. Fall back to serialized PROJJSON string
 
     Args:
         input_path: Path to GeoParquet file
         verbose: Whether to log debug info
 
     Returns:
-        SRS string for GDAL, or None if no CRS needed
+        SRS string for GDAL (always returns a value for valid input)
     """
     from geoparquet_io.core.common import _extract_crs_identifier
 
     crs = extract_crs_from_parquet(input_path, verbose)
-    if not crs or is_default_crs(crs):
-        return None
+
+    # For default CRS (None, EPSG:4326, OGC:CRS84), explicitly return EPSG:4326
+    # GDAL formats don't have implicit defaults - CRS must be explicit
+    # This fixes #189 (FlatGeobuf) and #190 (Shapefile) where .prj was missing
+    if is_default_crs(crs):
+        return "EPSG:4326"
 
     # Try EPSG code first (preferred format)
     epsg_info = _extract_crs_identifier(crs)
@@ -90,7 +98,7 @@ def _get_srs_parameter(input_path: str, verbose: bool = False) -> str | None:
         authority, code = epsg_info
         # Sanitize: authority should be alphanumeric, code should be int
         if authority.isalnum() and isinstance(code, int):
-            return f"{authority}:{code}"  # e.g., "EPSG:4326"
+            return f"{authority}:{code}"  # e.g., "EPSG:5070"
 
     # Fallback to PROJJSON - serialize and it will be escaped later
     return json.dumps(crs)
