@@ -201,6 +201,7 @@ def partition_by_quadkey(
                 min_resolution=0,
                 max_resolution=23,
                 verbose=verbose,
+                profile=profile,
             )
             resolution = calculated_resolution
             partition_resolution = calculated_resolution

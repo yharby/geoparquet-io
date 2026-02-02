@@ -320,6 +320,48 @@ class TestAutoResolutionIntegration:
         # Should respect bounds
         assert 3 <= resolution <= 6
 
+    def test_calculate_auto_resolution_negative_target_rows(self, fields_5070_file):
+        """Test that negative target_rows raises error."""
+        with pytest.raises(
+            ValueError, match="target_rows_per_partition must be a positive integer"
+        ):
+            calculate_auto_resolution(
+                input_parquet=fields_5070_file,
+                spatial_index_type="h3",
+                target_rows_per_partition=-100,
+            )
+
+    def test_calculate_auto_resolution_zero_target_rows(self, fields_5070_file):
+        """Test that zero target_rows raises error."""
+        with pytest.raises(
+            ValueError, match="target_rows_per_partition must be a positive integer"
+        ):
+            calculate_auto_resolution(
+                input_parquet=fields_5070_file,
+                spatial_index_type="h3",
+                target_rows_per_partition=0,
+            )
+
+    def test_calculate_auto_resolution_negative_max_partitions(self, fields_5070_file):
+        """Test that negative max_partitions raises error."""
+        with pytest.raises(ValueError, match="max_partitions must be a positive integer"):
+            calculate_auto_resolution(
+                input_parquet=fields_5070_file,
+                spatial_index_type="h3",
+                target_rows_per_partition=100,
+                max_partitions=-10,
+            )
+
+    def test_calculate_auto_resolution_zero_max_partitions(self, fields_5070_file):
+        """Test that zero max_partitions raises error."""
+        with pytest.raises(ValueError, match="max_partitions must be a positive integer"):
+            calculate_auto_resolution(
+                input_parquet=fields_5070_file,
+                spatial_index_type="h3",
+                target_rows_per_partition=100,
+                max_partitions=0,
+            )
+
 
 class TestAutoResolutionMath:
     """Test the mathematical correctness of resolution calculations."""

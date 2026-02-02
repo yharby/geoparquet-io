@@ -191,6 +191,7 @@ def partition_by_a5(
                 min_resolution=0,
                 max_resolution=30,
                 verbose=verbose,
+                profile=profile,
             )
             info(f"Auto-calculated A5 resolution: {resolution}")
         except Exception as e:

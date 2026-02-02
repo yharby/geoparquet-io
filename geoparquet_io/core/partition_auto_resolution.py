@@ -15,19 +15,28 @@ from geoparquet_io.core.common import get_duckdb_connection, needs_httpfs, safe_
 from geoparquet_io.core.logging_config import debug, info, warn
 
 
-def _get_total_row_count(input_parquet: str, verbose: bool = False) -> int:
+def _get_total_row_count(
+    input_parquet: str, verbose: bool = False, profile: str | None = None
+) -> int:
     """
     Get total row count from parquet file.
 
     Args:
         input_parquet: Input file path
         verbose: Print debug messages
+        profile: AWS profile name for S3 authentication (optional)
 
     Returns:
         Total number of rows
     """
+    from geoparquet_io.core.common import setup_aws_profile_if_needed
+
     input_url = safe_file_url(input_parquet, verbose)
     con = get_duckdb_connection(load_spatial=True, load_httpfs=needs_httpfs(input_parquet))
+
+    # Setup S3 authentication if profile specified
+    if profile:
+        setup_aws_profile_if_needed(con, profile)
 
     query = f"SELECT COUNT(*) FROM '{input_url}'"
     result = con.execute(query).fetchone()
@@ -267,6 +276,7 @@ def calculate_auto_resolution(
     min_resolution: int | None = None,
     max_resolution: int | None = None,
     verbose: bool = False,
+    profile: str | None = None,
 ) -> int:
     """
     Calculate optimal spatial index resolution for target partition size.
@@ -282,12 +292,13 @@ def calculate_auto_resolution(
         min_resolution: Minimum resolution (None = use index default)
         max_resolution: Maximum resolution (None = use index default)
         verbose: Print debug messages
+        profile: AWS profile name for S3 authentication (optional)
 
     Returns:
         Optimal resolution for the specified spatial index
 
     Raises:
-        ValueError: If spatial_index_type is not supported
+        ValueError: If spatial_index_type is not supported or parameters are invalid
 
     Examples:
         >>> # Calculate H3 resolution for ~100K rows per partition
@@ -307,11 +318,20 @@ def calculate_auto_resolution(
         ...     max_resolution=12
         ... )
     """
+    # Validate parameters
+    if target_rows_per_partition <= 0:
+        raise ValueError(
+            f"target_rows_per_partition must be a positive integer, got {target_rows_per_partition}"
+        )
+
+    if max_partitions <= 0:
+        raise ValueError(f"max_partitions must be a positive integer, got {max_partitions}")
+
     if verbose:
         debug(f"Calculating auto-resolution for {spatial_index_type}...")
 
     # Get total row count
-    total_rows = _get_total_row_count(input_parquet, verbose)
+    total_rows = _get_total_row_count(input_parquet, verbose, profile)
 
     if verbose:
         debug(f"Total rows: {total_rows:,}")

@@ -191,6 +191,7 @@ def partition_by_h3(
                 min_resolution=0,
                 max_resolution=15,
                 verbose=verbose,
+                profile=profile,
             )
             info(f"Auto-calculated H3 resolution: {resolution}")
         except Exception as e:
