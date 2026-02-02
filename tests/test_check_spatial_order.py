@@ -1,5 +1,7 @@
 """Tests for core/check_spatial_order.py module."""
 
+import pytest
+
 from geoparquet_io.core.check_spatial_order import (
     _bboxes_overlap,
     check_spatial_order,
@@ -180,15 +182,12 @@ class TestCheckSpatialOrderBboxStats:
         assert result["overlap_count"] >= 0
         assert result["total_pairs"] >= 0
 
-    def test_with_buildings_file(self, buildings_test_file):
-        """Test bbox-stats method with buildings file."""
-        result = check_spatial_order_bbox_stats(
-            buildings_test_file, verbose=False, return_results=True, quiet=False
-        )
-        assert isinstance(result, dict)
-        assert "passed" in result
-        assert "method" in result
-        assert result["method"] == "bbox_stats"
+    def test_without_bbox_column_raises_error(self, buildings_test_file):
+        """Test that files without bbox column raise ValueError."""
+        with pytest.raises(ValueError, match="does not have a bbox column"):
+            check_spatial_order_bbox_stats(
+                buildings_test_file, verbose=False, return_results=True, quiet=False
+            )
 
     def test_verbose_mode(self, places_test_file):
         """Test bbox-stats method with verbose=True."""

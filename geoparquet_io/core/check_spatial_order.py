@@ -116,6 +116,113 @@ def _print_standalone_results(ratio, consecutive_avg, random_avg):
         progress("=> Data might not be strongly clustered (or is partially clustered).")
 
 
+def _print_bbox_stats_results(ratio, overlap_count, total_pairs):
+    """Print bbox-stats results when running as standalone command."""
+    progress("\nResults:")
+    debug(f"Row group pairs analyzed: {total_pairs}")
+    debug(f"Overlapping pairs: {overlap_count}")
+    progress(f"Overlap ratio: {ratio:.2f}")
+
+    if ratio < 0.3:
+        progress("=> Data appears well spatially ordered (low row group overlap).")
+    else:
+        progress("=> Data may benefit from spatial ordering (high row group overlap).")
+
+
+def check_spatial_order_bbox_stats(parquet_file, verbose=False, return_results=False, quiet=False):
+    """Check spatial ordering using row group bbox statistics.
+
+    This method is faster than sampling because it only reads row group metadata
+    instead of actual geometry data. It checks if consecutive row groups have
+    overlapping bounding boxes, which indicates poor spatial ordering.
+
+    Args:
+        parquet_file: Path to parquet file
+        verbose: Print additional information
+        return_results: If True, return structured results dict
+        quiet: If True, suppress all output
+
+    Returns:
+        ratio (float) if return_results=False, or dict if return_results=True
+    """
+    from geoparquet_io.core.duckdb_metadata import (
+        get_per_row_group_bbox_stats,
+        has_bbox_column,
+    )
+
+    safe_url = safe_file_url(parquet_file, verbose)
+
+    # Check for bbox column
+    has_bbox, bbox_col_name = has_bbox_column(safe_url)
+    if not has_bbox or not bbox_col_name:
+        raise ValueError(
+            f"File {parquet_file} does not have a bbox column. "
+            "Use the sampling-based method instead."
+        )
+
+    if verbose:
+        debug(f"Using bbox column: {bbox_col_name}")
+
+    # Get bbox stats per row group
+    row_group_bboxes = get_per_row_group_bbox_stats(safe_url, bbox_col_name)
+
+    if verbose:
+        debug(f"Analyzing {len(row_group_bboxes)} row groups")
+
+    # Handle edge cases
+    if len(row_group_bboxes) <= 1:
+        # Can't check ordering with 0 or 1 row groups
+        if verbose:
+            debug("Only one or zero row groups - assuming well ordered")
+        ratio = 0.0
+        overlap_count = 0
+        total_pairs = 0
+    else:
+        # Count overlaps in consecutive row group pairs
+        overlap_count = 0
+        for i in range(len(row_group_bboxes) - 1):
+            bbox1 = row_group_bboxes[i]
+            bbox2 = row_group_bboxes[i + 1]
+            if _bboxes_overlap(bbox1, bbox2):
+                overlap_count += 1
+                if verbose:
+                    debug(f"Row groups {bbox1['row_group_id']} and {bbox2['row_group_id']} overlap")
+
+        total_pairs = len(row_group_bboxes) - 1
+        ratio = overlap_count / total_pairs if total_pairs > 0 else 0.0
+
+        if verbose:
+            debug(f"Overlapping pairs: {overlap_count}/{total_pairs}")
+
+    # Pass if < 30% overlap
+    passed = ratio < 0.3
+
+    # Build results dict
+    issues = []
+    recommendations = []
+    if not passed:
+        issues.append(f"Poor spatial ordering (overlap ratio: {ratio:.2f})")
+        recommendations.append("Apply Hilbert spatial ordering for better query performance")
+
+    # Print standalone results if not quiet and not return_results
+    if not quiet and not return_results and not verbose:
+        _print_bbox_stats_results(ratio, overlap_count, total_pairs)
+
+    if return_results:
+        return {
+            "passed": passed,
+            "ratio": ratio,
+            "overlap_count": overlap_count,
+            "total_pairs": total_pairs,
+            "method": "bbox_stats",
+            "issues": issues,
+            "recommendations": recommendations,
+            "fix_available": not passed,
+        }
+
+    return ratio
+
+
 def check_spatial_order(
     parquet_file, random_sample_size, limit_rows, verbose, return_results=False, quiet=False
 ):
