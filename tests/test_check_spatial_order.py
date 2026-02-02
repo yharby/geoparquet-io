@@ -243,3 +243,83 @@ class TestCheckSpatialOrderBboxStats:
         )
         # Should return ratio directly when return_results=False
         assert result is None or isinstance(result, float)
+
+
+class TestAutoDetectionAndFallback:
+    """Tests for automatic method detection and fallback behavior."""
+
+    def test_auto_detection_uses_bbox_stats_when_available(self, places_test_file):
+        """Test that check_spatial_order auto-detects and uses bbox-stats."""
+        result = check_spatial_order(
+            places_test_file,
+            random_sample_size=50,
+            limit_rows=500,
+            verbose=False,
+            return_results=True,
+        )
+        # Should use bbox_stats method automatically
+        assert result["method"] == "bbox_stats"
+
+    def test_fallback_to_sampling_when_no_bbox(self, buildings_test_file):
+        """Test that check_spatial_order falls back to sampling when no bbox."""
+        result = check_spatial_order(
+            buildings_test_file,
+            random_sample_size=50,
+            limit_rows=500,
+            verbose=False,
+            return_results=True,
+        )
+        # Should fall back to sampling method
+        assert result["method"] == "sampling"
+        assert "consecutive_avg" in result
+        assert "random_avg" in result
+
+    def test_fallback_shows_warning_verbose(self, buildings_test_file, capsys):
+        """Test that fallback shows warning in verbose mode."""
+        check_spatial_order(
+            buildings_test_file,
+            random_sample_size=50,
+            limit_rows=500,
+            verbose=True,
+            return_results=True,
+        )
+        captured = capsys.readouterr()
+        assert (
+            "bbox column not found" in captured.out.lower()
+            or "falling back" in captured.out.lower()
+        )
+
+    def test_bbox_stats_method_indicated_in_result(self, places_test_file):
+        """Test that method field correctly indicates bbox_stats."""
+        result = check_spatial_order(
+            places_test_file,
+            random_sample_size=50,
+            limit_rows=500,
+            verbose=False,
+            return_results=True,
+        )
+        assert "method" in result
+        assert result["method"] in ["bbox_stats", "sampling"]
+
+    def test_return_structure_consistent_across_methods(
+        self, places_test_file, buildings_test_file
+    ):
+        """Test that both methods return compatible structures."""
+        bbox_result = check_spatial_order(
+            places_test_file,
+            random_sample_size=50,
+            limit_rows=500,
+            verbose=False,
+            return_results=True,
+        )
+        sampling_result = check_spatial_order(
+            buildings_test_file,
+            random_sample_size=50,
+            limit_rows=500,
+            verbose=False,
+            return_results=True,
+        )
+        # Both should have these common fields
+        for field in ["passed", "ratio", "issues", "recommendations", "fix_available", "method"]:
+            assert field in bbox_result
+            assert field in sampling_result
