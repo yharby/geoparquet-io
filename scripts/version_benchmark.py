@@ -661,6 +661,156 @@ def compare_results(file1: str, file2: str):
     print()
 
 
+def analyze_trends(baseline_files: list[str], degradation_threshold: float = 0.05) -> dict:
+    """Analyze performance trends across multiple baseline files.
+
+    Args:
+        baseline_files: List of baseline JSON files, ordered from oldest to newest
+        degradation_threshold: Threshold for detecting degradation (default 5% = 0.05)
+
+    Returns:
+        Dictionary with trend analysis results including warnings and statistics
+    """
+    if len(baseline_files) < 2:
+        return {
+            "error": "Need at least 2 baselines for trend analysis",
+            "baselines_count": len(baseline_files),
+        }
+
+    # Load all baselines
+    baselines = []
+    for filepath in baseline_files:
+        try:
+            with open(filepath) as f:
+                baselines.append(json.load(f))
+        except Exception as e:
+            return {"error": f"Failed to load {filepath}: {e}"}
+
+    # Extract versions for reporting
+    versions = [b.get("version", "unknown") for b in baselines]
+
+    # Build time series for each (file_size, operation) pair
+    time_series = {}
+    for baseline in baselines:
+        for bench in baseline["benchmarks"]:
+            if bench["avg_time"] is None or bench["avg_time"] <= 0:
+                continue
+            key = (bench["file_size"], bench["operation"])
+            if key not in time_series:
+                time_series[key] = []
+            time_series[key].append(bench["avg_time"])
+
+    # Detect gradual degradation
+    warnings = []
+    consistent_improvements = []
+
+    for key, times in time_series.items():
+        if len(times) < 3:
+            continue
+
+        file_size, operation = key
+
+        # Calculate deltas between consecutive versions
+        deltas = [(times[i + 1] - times[i]) / times[i] for i in range(len(times) - 1)]
+
+        # Check for consistent degradation (last 2 deltas both exceed threshold)
+        if len(deltas) >= 2 and all(d > degradation_threshold for d in deltas[-2:]):
+            avg_degradation = sum(deltas[-2:]) / 2 * 100
+            warnings.append(
+                {
+                    "file_size": file_size,
+                    "operation": operation,
+                    "type": "gradual_degradation",
+                    "avg_degradation_pct": round(avg_degradation, 1),
+                    "releases_affected": 2,
+                    "message": f"{operation} ({file_size}): {avg_degradation:.1f}% avg degradation over last 2 releases",
+                }
+            )
+
+        # Check for consistent improvement
+        if len(deltas) >= 2 and all(d < -degradation_threshold for d in deltas[-2:]):
+            avg_improvement = -sum(deltas[-2:]) / 2 * 100
+            consistent_improvements.append(
+                {
+                    "file_size": file_size,
+                    "operation": operation,
+                    "avg_improvement_pct": round(avg_improvement, 1),
+                    "message": f"{operation} ({file_size}): {avg_improvement:.1f}% avg improvement over last 2 releases",
+                }
+            )
+
+    # Calculate overall statistics
+    all_deltas = []
+    for times in time_series.values():
+        if len(times) >= 2:
+            deltas = [(times[i + 1] - times[i]) / times[i] for i in range(len(times) - 1)]
+            all_deltas.extend(deltas)
+
+    if all_deltas:
+        avg_change = sum(all_deltas) / len(all_deltas) * 100
+        max_regression = max(all_deltas) * 100 if all_deltas else 0
+        max_improvement = min(all_deltas) * 100 if all_deltas else 0
+    else:
+        avg_change = 0
+        max_regression = 0
+        max_improvement = 0
+
+    return {
+        "versions": versions,
+        "baselines_count": len(baselines),
+        "operations_tracked": len(time_series),
+        "warnings": warnings,
+        "improvements": consistent_improvements,
+        "statistics": {
+            "avg_change_pct": round(avg_change, 2),
+            "max_regression_pct": round(max_regression, 1),
+            "max_improvement_pct": round(max_improvement, 1),
+        },
+    }
+
+
+def print_trend_analysis(trend_data: dict):
+    """Print trend analysis in human-readable format."""
+    if "error" in trend_data:
+        print(f"\nTrend Analysis Error: {trend_data['error']}")
+        return
+
+    print(f"\n{'=' * 70}")
+    print("Trend Analysis Across Releases")
+    print(f"{'=' * 70}")
+    print(f"Versions: {' → '.join(trend_data['versions'])}")
+    print(f"Baselines: {trend_data['baselines_count']}")
+    print(f"Operations tracked: {trend_data['operations_tracked']}")
+    print()
+
+    # Print statistics
+    stats = trend_data["statistics"]
+    print("Overall Statistics:")
+    print(f"  Average change: {stats['avg_change_pct']:+.2f}%")
+    print(f"  Max regression: {stats['max_regression_pct']:+.1f}%")
+    print(f"  Max improvement: {stats['max_improvement_pct']:+.1f}%")
+    print()
+
+    # Print warnings
+    if trend_data["warnings"]:
+        print(f"⚠️  Gradual Degradation Detected ({len(trend_data['warnings'])} operations):")
+        print("-" * 70)
+        for w in trend_data["warnings"]:
+            print(f"  • {w['message']}")
+        print()
+    else:
+        print("✅ No gradual degradation detected")
+        print()
+
+    # Print improvements
+    if trend_data["improvements"]:
+        print(f"🚀 Consistent Improvements ({len(trend_data['improvements'])} operations):")
+        print("-" * 70)
+        for imp in trend_data["improvements"]:
+            print(f"  • {imp['message']}")
+        print()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Version comparison benchmark")
     parser.add_argument(
@@ -707,6 +857,18 @@ def main():
         metavar=("FILE1", "FILE2"),
         help="Compare two result files",
     )
+    parser.add_argument(
+        "--trend",
+        nargs="+",
+        metavar="FILE",
+        help="Analyze trends across multiple baseline files (oldest to newest)",
+    )
+    parser.add_argument(
+        "--trend-threshold",
+        type=float,
+        default=0.05,
+        help="Degradation threshold for trend analysis (default: 0.05 = 5%%)",
+    )
 
     args = parser.parse_args()
 
@@ -735,6 +897,15 @@ def main():
 
     if args.compare:
         compare_results(args.compare[0], args.compare[1])
+    elif args.trend:
+        trend_data = analyze_trends(args.trend, args.trend_threshold)
+        print_trend_analysis(trend_data)
+
+        # Also output JSON for GitHub Actions consumption
+        if args.output:
+            with open(args.output, "w") as f:
+                json.dump(trend_data, f, indent=2)
+            print(f"\nTrend data saved to {args.output}")
     elif args.version_label:
         results = run_benchmarks(
             args.version_label,
