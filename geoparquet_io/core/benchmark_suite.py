@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import cProfile
 import gc
 import json
 import platform
@@ -18,6 +19,7 @@ import psutil
 
 from geoparquet_io.benchmarks.config import DEFAULT_THRESHOLDS, RegressionThresholds
 from geoparquet_io.benchmarks.operations import get_operation
+from geoparquet_io.benchmarks.profile_report import save_profile_data
 from geoparquet_io.core.logging_config import debug, progress
 
 
@@ -40,12 +42,48 @@ class BenchmarkResult:
     iteration: int = 1
 
 
+def _save_profile_stats(
+    profiler: cProfile.Profile,
+    profile_dir: Path,
+    operation: str,
+    input_path: Path,
+    iteration: int,
+    details: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """
+    Save profiler stats and update details dict.
+
+    Args:
+        profiler: cProfile.Profile object with collected data
+        profile_dir: Directory for profile output
+        operation: Operation name
+        input_path: Input file path
+        iteration: Iteration number
+        details: Existing details dict (or None)
+
+    Returns:
+        Updated details dict with profile_path added
+    """
+    profiler.disable()
+    profile_path = profile_dir / f"{operation}_{input_path.stem}_{iteration}.prof"
+    save_profile_data(profiler, profile_path)
+
+    # Ensure we have a dict to update
+    if not isinstance(details, dict):
+        details = {}
+
+    details["profile_path"] = str(profile_path)
+    return details
+
+
 def run_single_operation(
     operation: str,
     input_path: Path,
     output_dir: Path,
     iteration: int = 1,
     memory_limit_mb: int | None = None,
+    profile: bool = False,
+    profile_dir: Path | None = None,
 ) -> BenchmarkResult:
     """
     Run a single benchmark operation with timing and memory tracking.
@@ -60,6 +98,8 @@ def run_single_operation(
         output_dir: Directory for output files
         iteration: Iteration number (for multiple runs)
         memory_limit_mb: Optional memory limit context
+        profile: Enable cProfile profiling (default: False)
+        profile_dir: Directory for profile output (required if profile=True)
 
     Returns:
         BenchmarkResult with timing and memory data
@@ -74,11 +114,25 @@ def run_single_operation(
     process = psutil.Process()
     baseline_rss = process.memory_info().rss
 
+    # Initialize profiler if requested
+    profiler = None
+    if profile:
+        if profile_dir is None:
+            raise ValueError("profile_dir is required when profile=True")
+        profiler = cProfile.Profile()
+        profiler.enable()
+
     start_time = time.perf_counter()
 
     try:
         details = run_func(input_path, output_dir)
         elapsed = time.perf_counter() - start_time
+
+        # Save profiler stats if profiling enabled
+        if profiler is not None:
+            details = _save_profile_stats(
+                profiler, profile_dir, operation, input_path, iteration, details
+            )
 
         # Get RSS after operation
         current_rss = process.memory_info().rss
@@ -99,6 +153,13 @@ def run_single_operation(
 
     except Exception as e:
         elapsed = time.perf_counter() - start_time
+
+        # Save profiler stats even on error
+        details = {}
+        if profiler is not None:
+            details = _save_profile_stats(
+                profiler, profile_dir, operation, input_path, iteration, None
+            )
 
         current_rss = process.memory_info().rss
         rss_delta_mb = (current_rss - baseline_rss) / (1024 * 1024)
@@ -195,6 +256,8 @@ def run_benchmark_suite(
     memory_limit_mb: int | None = None,
     warmup: bool = True,
     verbose: bool = False,
+    profile: bool = False,
+    profile_dir: Path | None = None,
 ) -> SuiteResult:
     """
     Run the full benchmark suite.
@@ -206,6 +269,8 @@ def run_benchmark_suite(
         memory_limit_mb: Memory limit context (for reporting)
         warmup: Run a warmup iteration first (discarded from results)
         verbose: Show progress output
+        profile: Enable cProfile profiling (default: False)
+        profile_dir: Directory for profile output (required if profile=True)
 
     Returns:
         SuiteResult with all benchmark data
@@ -230,6 +295,8 @@ def run_benchmark_suite(
                         input_path=input_path,
                         output_dir=Path(output_dir),
                         iteration=0,  # Warmup iteration
+                        profile=False,  # Never profile warmup runs
+                        profile_dir=None,
                     )
 
             # Actual benchmark runs
@@ -241,6 +308,8 @@ def run_benchmark_suite(
                         output_dir=Path(output_dir),
                         iteration=iteration,
                         memory_limit_mb=memory_limit_mb,
+                        profile=profile,
+                        profile_dir=profile_dir,
                     )
                     results.append(result)
 
