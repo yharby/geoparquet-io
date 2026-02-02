@@ -165,8 +165,8 @@ def _build_tippecanoe_command(
     attribution: str | None = None,
 ) -> list[str]:
     """Build the tippecanoe command with production-quality settings."""
-    # Start with basic command - use --read-parallel instead of -P
-    cmd = ["tippecanoe", "--read-parallel", "-o", output_path]
+    # Start with basic command
+    cmd = ["tippecanoe", "-P", "-o", output_path]
 
     # Add layer name
     if layer:
@@ -181,12 +181,11 @@ def _build_tippecanoe_command(
         attribution = '<a href="https://geoparquet.io/" target="_blank">geoparquet-io</a>'
     cmd.append(f"--attribution={attribution}")
 
-    # Add zoom levels - use --maximum-zoom for consistency with FieldMaps pattern
+    # Add zoom levels
     if min_zoom is not None and max_zoom is not None:
-        cmd.extend(["-Z", str(min_zoom)])
-        cmd.append(f"--maximum-zoom={max_zoom}")
+        cmd.extend(["-Z", str(min_zoom), "-z", str(max_zoom)])
     elif max_zoom is not None:
-        cmd.append(f"--maximum-zoom={max_zoom}")
+        cmd.extend(["-z", str(max_zoom)])
     else:
         # Use tippecanoe's auto zoom detection
         cmd.append("-zg")
@@ -195,7 +194,6 @@ def _build_tippecanoe_command(
     cmd.append("--simplify-only-low-zooms")
     cmd.append("--no-simplification-of-shared-nodes")
     cmd.append("--no-tile-size-limit")
-    cmd.append("--force")
     cmd.append("--drop-densest-as-needed")
 
     if verbose:

@@ -197,7 +197,7 @@ def test_build_tippecanoe_command_basic():
     )
 
     assert "tippecanoe" in cmd
-    assert "--read-parallel" in cmd  # Parallel mode (updated)
+    assert "-P" in cmd  # Parallel mode
     assert "-o" in cmd
     assert "output.pmtiles" in cmd
     assert "-l" in cmd
@@ -221,7 +221,8 @@ def test_build_tippecanoe_command_with_zoom():
 
     assert "-Z" in cmd
     assert "0" in cmd
-    assert "--maximum-zoom=14" in cmd  # Updated to use --maximum-zoom
+    assert "-z" in cmd
+    assert "14" in cmd
     assert "-zg" not in cmd  # No auto detection when explicit
     assert "--progress-interval=1" in cmd  # Verbose mode
 
@@ -277,36 +278,36 @@ def test_build_tippecanoe_command_has_new_flags():
         attribution=None,
     )
 
-    # Should use --read-parallel instead of -P
-    assert "--read-parallel" in cmd
-    assert "-P" not in cmd
+    # Should use -P for parallel mode
+    assert "-P" in cmd
 
     # Should include new optimization flags
     assert "--simplify-only-low-zooms" in cmd
     assert "--no-simplification-of-shared-nodes" in cmd
     assert "--no-tile-size-limit" in cmd
-    assert "--force" in cmd
 
     # Should still have existing flags
     assert "--drop-densest-as-needed" in cmd
 
 
-def test_build_tippecanoe_command_uses_maximum_zoom():
-    """Test that --maximum-zoom is used instead of -z."""
+def test_build_tippecanoe_command_with_max_zoom_only():
+    """Test that -z is used for max zoom."""
     from gpio_pmtiles.core import _build_tippecanoe_command
 
     cmd = _build_tippecanoe_command(
         output_path="output.pmtiles",
         layer="test_layer",
-        min_zoom=0,
+        min_zoom=None,
         max_zoom=11,
         verbose=False,
         attribution=None,
     )
 
-    # Should use --maximum-zoom instead of -z
-    assert "--maximum-zoom=11" in cmd
-    assert "-z" not in cmd or (cmd[cmd.index("-z") + 1] if "-z" in cmd else None) != "11"
+    # Should use -z for max zoom
+    assert "-z" in cmd
+    assert "11" in cmd
+    # Should not have -Z when min_zoom is not specified
+    assert cmd.count("-Z") == 0
 
 
 # Path validation tests
