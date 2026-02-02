@@ -52,11 +52,24 @@ Runs all validation checks:
     print(f"Spatially ordered: {result.passed()}")
     ```
 
-Checks if data is spatially ordered using random sampling. Spatially ordered data improves:
+Checks if data is spatially ordered. Spatially ordered data improves:
 
-- Query performance
+- Query performance (10-100x faster for spatial queries)
 - Compression ratios
 - Cloud access patterns
+
+**Method Selection:**
+
+- **GeoParquet 2.0+ files** (with bbox column): Uses fast bbox-stats method by analyzing row group metadata (~10-100x faster)
+- **GeoParquet 1.x files** (no bbox column): Falls back to sampling method which analyzes actual geometry data
+
+!!! tip "For faster spatial order checks"
+    Add a bbox column to your file with `gpio add bbox` to enable the fast bbox-stats method.
+
+**How it works:**
+
+- **Bbox-stats method**: Checks if consecutive row groups have overlapping bounding boxes. Non-overlapping row groups indicate good spatial ordering. Passes if < 30% of row group pairs overlap.
+- **Sampling method**: Compares average distance between consecutive features vs random feature pairs. Lower ratio indicates better spatial clustering. Passes if ratio < 0.5.
 
 ### Compression
 
