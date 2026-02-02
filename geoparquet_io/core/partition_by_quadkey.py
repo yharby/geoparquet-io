@@ -12,8 +12,6 @@ from geoparquet_io.core.add_quadkey_column import add_quadkey_column
 from geoparquet_io.core.common import safe_file_url
 from geoparquet_io.core.constants import (
     DEFAULT_QUADKEY_COLUMN_NAME,
-    DEFAULT_QUADKEY_PARTITION_RESOLUTION,
-    DEFAULT_QUADKEY_RESOLUTION,
 )
 from geoparquet_io.core.logging_config import (
     configure_verbose,
@@ -211,24 +209,18 @@ def partition_by_quadkey(
                 os.remove(stdin_temp_file)
             raise click.ClickException(f"Auto-resolution calculation failed: {str(e)}") from e
     else:
-        # Use defaults if not provided
-        if resolution is None:
-            resolution = DEFAULT_QUADKEY_RESOLUTION
-        if partition_resolution is None:
-            partition_resolution = DEFAULT_QUADKEY_PARTITION_RESOLUTION
+        # Require explicit resolution values (consistent with H3/A5)
+        if resolution is None or partition_resolution is None:
+            if stdin_temp_file and os.path.exists(stdin_temp_file):
+                os.remove(stdin_temp_file)
+            raise click.UsageError(
+                "Must specify either --auto or both --resolution and --partition-resolution"
+            )
 
     _validate_resolutions(resolution, partition_resolution)
 
     if keep_quadkey_column is None:
         keep_quadkey_column = hive
-
-    # Handle stdin input
-    stdin_temp_file = None
-    actual_input = input_parquet
-
-    if is_stdin(input_parquet):
-        stdin_temp_file = read_stdin_to_temp_file(verbose)
-        actual_input = stdin_temp_file
 
     try:
         working_parquet, temp_file = _ensure_quadkey_column(

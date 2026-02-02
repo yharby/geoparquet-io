@@ -4098,14 +4098,31 @@ def partition_kdtree(
 @click.option(
     "--resolution",
     type=click.IntRange(0, 23),
-    default=13,
-    help="Resolution for auto-adding quadkey column (0-23, default: 13)",
+    default=None,
+    help="Resolution for auto-adding quadkey column (0-23). Required unless --auto is used.",
 )
 @click.option(
     "--partition-resolution",
     type=click.IntRange(0, 23),
-    default=9,
-    help="Resolution for partitioning as prefix length (0-23, default: 9)",
+    default=None,
+    help="Resolution for partitioning as prefix length (0-23). Required unless --auto is used.",
+)
+@click.option(
+    "--auto",
+    is_flag=True,
+    help="Automatically calculate optimal resolution based on data size",
+)
+@click.option(
+    "--target-rows",
+    type=int,
+    default=100000,
+    help="Target rows per partition when using --auto (default: 100000)",
+)
+@click.option(
+    "--max-partitions",
+    type=int,
+    default=10000,
+    help="Maximum partitions when using --auto (default: 10000)",
 )
 @click.option(
     "--use-centroid",
@@ -4128,6 +4145,9 @@ def partition_quadkey(
     quadkey_column,
     resolution,
     partition_resolution,
+    auto,
+    target_rows,
+    max_partitions,
     use_centroid,
     keep_quadkey_column,
     hive,
@@ -4152,8 +4172,8 @@ def partition_quadkey(
     partition resolution. If the quadkey column doesn't exist, it will be automatically
     added at the specified resolution before partitioning.
 
-    The column is created at --resolution (default 13), but partitions are created using
-    the first --partition-resolution characters (default 9) of each quadkey. This allows
+    The column is created at --resolution, but partitions are created using
+    the first --partition-resolution characters of each quadkey. This allows
     for coarser partitioning while retaining full precision in the column.
 
     By default, the quadkey column is excluded from output files (since it's redundant
@@ -4162,22 +4182,29 @@ def partition_quadkey(
 
     Use --preview to see what partitions would be created without actually creating files.
 
+    Auto-resolution mode: Use --auto to automatically calculate the optimal quadkey zoom
+    level based on your target partition size. Specify --target-rows (default: 100K) to
+    control partition granularity.
+
     Examples:
 
-        # Preview partitions
-        gpio partition quadkey input.parquet --preview
+        # Auto-calculate optimal resolution for ~100K rows per partition
+        gpio partition quadkey input.parquet output/ --auto
 
-        # Partition by quadkey cells (column excluded from output by default)
-        gpio partition quadkey input.parquet output/
+        # Auto with custom target size (fewer, larger partitions)
+        gpio partition quadkey input.parquet output/ --auto --target-rows 500000
+
+        # Preview partitions with auto-resolution
+        gpio partition quadkey input.parquet --auto --preview
+
+        # Partition by quadkey cells at specific resolutions
+        gpio partition quadkey input.parquet output/ --resolution 13 --partition-resolution 9
 
         # Partition with quadkey column kept in output files
-        gpio partition quadkey input.parquet output/ --keep-quadkey-column
-
-        # Partition at higher resolution (zoom 12)
-        gpio partition quadkey input.parquet output/ --partition-resolution 12
+        gpio partition quadkey input.parquet output/ --resolution 13 --partition-resolution 9 --keep-quadkey-column
 
         # Use Hive-style partitioning (quadkey column included by default)
-        gpio partition quadkey input.parquet output/ --hive
+        gpio partition quadkey input.parquet output/ --auto --hive
     """
     # If preview mode, output_folder is not required
     if not preview and not output_folder:
@@ -4211,6 +4238,9 @@ def partition_quadkey(
         row_group_size_mb=row_group_mb,
         row_group_rows=row_group_size,
         memory_limit=write_memory,
+        auto=auto,
+        target_rows=target_rows,
+        max_partitions=max_partitions,
     )
 
 
