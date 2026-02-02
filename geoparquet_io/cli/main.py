@@ -30,6 +30,7 @@ from geoparquet_io.core.add_bbox_metadata import add_bbox_metadata as add_bbox_m
 from geoparquet_io.core.add_h3_column import add_h3_column as add_h3_column_impl
 from geoparquet_io.core.add_kdtree_column import add_kdtree_column as add_kdtree_column_impl
 from geoparquet_io.core.add_quadkey_column import add_quadkey_column as add_quadkey_column_impl
+from geoparquet_io.core.add_s2_column import add_s2_column as add_s2_column_impl
 from geoparquet_io.core.check_parquet_structure import check_all as check_structure_impl
 from geoparquet_io.core.check_spatial_order import check_spatial_order as check_spatial_impl
 from geoparquet_io.core.common import validate_parquet_extension
@@ -61,6 +62,7 @@ from geoparquet_io.core.partition_by_kdtree import partition_by_kdtree as partit
 from geoparquet_io.core.partition_by_quadkey import (
     partition_by_quadkey as partition_by_quadkey_impl,
 )
+from geoparquet_io.core.partition_by_s2 import partition_by_s2 as partition_by_s2_impl
 from geoparquet_io.core.partition_by_string import (
     partition_by_string as partition_by_string_impl,
 )
@@ -3209,6 +3211,85 @@ def add_a5(
         raise click.ClickException(str(e)) from None
 
 
+@add.command(name="s2", cls=SingleFileCommand)
+@click.argument("input_parquet")
+@click.argument("output_parquet", required=False, default=None)
+@click.option("--s2-name", default="s2_cell", help="Name for the S2 column (default: s2_cell)")
+@click.option(
+    "--level",
+    default=13,
+    type=click.IntRange(0, 30),
+    help="S2 level (0-30). Level 8: ~1,250km², Level 13: ~1.2km², Level 18: ~1,200m². Default: 13",
+)
+@output_format_options
+@geoparquet_version_option
+@overwrite_option
+@dry_run_option
+@verbose_option
+@any_extension_option
+@show_sql_option
+def add_s2(
+    input_parquet,
+    output_parquet,
+    s2_name,
+    level,
+    compression,
+    compression_level,
+    row_group_size,
+    row_group_size_mb,
+    write_memory,
+    geoparquet_version,
+    overwrite,
+    dry_run,
+    verbose,
+    any_extension,
+    show_sql,
+):
+    """Add an S2 cell ID column to a GeoParquet file.
+
+    Computes S2 spherical cell IDs based on geometry centroids. S2 is Google's
+    hierarchical spherical geospatial indexing system that provides consistent
+    coverage across the globe using a quadtree structure.
+
+    The cell ID is stored as a token (hex string) for maximum portability across tools.
+    Level determines cell size - higher values mean smaller cells with more precision.
+
+    Supports both local and remote (S3, GCS, Azure) inputs and outputs.
+    """
+    # Validate output early - provides helpful error if no output and not piping
+    from geoparquet_io.core.streaming import StreamingError, validate_output
+
+    try:
+        validate_output(output_parquet)
+    except StreamingError as e:
+        raise click.ClickException(str(e)) from None
+
+    # Validate .parquet extension
+    validate_parquet_extension(output_parquet, any_extension)
+
+    # Parse row group options
+    row_group_mb = parse_row_group_options(row_group_size, row_group_size_mb)
+
+    try:
+        add_s2_column_impl(
+            input_parquet,
+            output_parquet,
+            s2_name,
+            level,
+            dry_run,
+            verbose,
+            compression.upper(),
+            compression_level,
+            row_group_mb,
+            row_group_size,
+            None,
+            geoparquet_version,
+            overwrite=overwrite,
+        )
+    except StreamingError as e:
+        raise click.ClickException(str(e)) from None
+
+
 @add.command(name="kdtree", cls=SingleFileCommand)
 @click.argument("input_parquet")
 @click.argument("output_parquet")
@@ -3743,6 +3824,152 @@ def partition_h3(
         preview_limit,
         verbose,
         keep_h3_col,
+        force,
+        skip_analysis,
+        prefix,
+        None,
+        geoparquet_version,
+        compression=compression.upper(),
+        compression_level=compression_level,
+        row_group_size_mb=row_group_mb,
+        row_group_rows=row_group_size,
+        memory_limit=write_memory,
+    )
+
+
+@partition.command(name="s2", cls=SingleFileCommand)
+@click.argument("input_parquet")
+@click.argument("output_folder", required=False)
+@click.option(
+    "--s2-name",
+    default="s2_cell",
+    help="Name of S2 column to partition by (default: s2_cell)",
+)
+@click.option(
+    "--level",
+    type=click.IntRange(0, 30),
+    default=13,
+    help="S2 level for partitioning (0-30, default: 13)",
+)
+@click.option(
+    "--auto",
+    is_flag=True,
+    help="Auto-select S2 level based on target rows per partition (mutually exclusive with --level)",
+)
+@click.option(
+    "--target-rows",
+    type=int,
+    default=100000,
+    help="Target rows per partition for auto mode (default: 100,000)",
+)
+@click.option(
+    "--keep-s2-column",
+    is_flag=True,
+    help="Keep the S2 column in output files (default: excluded for non-Hive, included for Hive)",
+)
+@partition_options
+@output_format_options
+@verbose_option
+@geoparquet_version_option
+@show_sql_option
+def partition_s2(
+    input_parquet,
+    output_folder,
+    s2_name,
+    level,
+    auto,
+    target_rows,
+    keep_s2_column,
+    hive,
+    overwrite,
+    preview,
+    preview_limit,
+    force,
+    skip_analysis,
+    prefix,
+    compression,
+    compression_level,
+    row_group_size,
+    row_group_size_mb,
+    write_memory,
+    verbose,
+    geoparquet_version,
+    show_sql,
+):
+    """Partition a GeoParquet file by S2 cells at specified level.
+
+    Creates separate GeoParquet files based on S2 cell tokens. If the S2 column
+    doesn't exist, it will be automatically added before partitioning.
+
+    S2 (Google's Spherical Geometry library) uses a hierarchical quadtree structure
+    that divides Earth's surface into cells. Level 0 has 6 base cells, and each
+    subsequent level subdivides by 4.
+
+    By default, uses level 13 (~1.2km² cells). Use --auto to automatically select
+    the optimal level based on your dataset size and --target-rows setting.
+
+    By default, the S2 column is excluded from output files (since it's redundant with the
+    partition path) unless using Hive-style partitioning. Use --keep-s2-column to explicitly
+    keep the column in all cases.
+
+    Use --preview to see what partitions would be created without actually creating files.
+
+    Examples:
+
+        # Auto-select level for ~50k rows per partition
+        gpio partition s2 input.parquet output/ --auto --target-rows 50000
+
+        # Explicit level 10 (~78km² cells)
+        gpio partition s2 input.parquet output/ --level 10
+
+        # Preview auto-selected partitions
+        gpio partition s2 input.parquet --auto --preview
+
+        # Partition by S2 cells at default level 13 (~1.2km² cells)
+        gpio partition s2 input.parquet output/
+
+        # Partition with S2 column kept in output files
+        gpio partition s2 input.parquet output/ --keep-s2-column
+
+        # Partition with custom S2 column name
+        gpio partition s2 input.parquet output/ --s2-name my_s2
+
+        # Use Hive-style partitioning at level 10 (S2 column included by default)
+        gpio partition s2 input.parquet output/ --level 10 --hive
+    """
+    # If preview mode, output_folder is not required
+    if not preview and not output_folder:
+        raise click.UsageError("OUTPUT_FOLDER is required unless using --preview")
+
+    # Validate mutually exclusive level/auto options
+    if level != 13 and auto:  # 13 is the default
+        raise click.UsageError("--level and --auto are mutually exclusive")
+
+    # Calculate level in auto mode
+    if auto:
+        from geoparquet_io.core.partition_by_s2 import _calculate_s2_level_for_target
+
+        level = _calculate_s2_level_for_target(input_parquet, target_rows, verbose)
+        if verbose:
+            click.echo(f"Auto-selected S2 level: {level}", err=True)
+
+    # Validate mutual exclusivity of row group options and get MB value
+    row_group_mb = parse_row_group_options(row_group_size, row_group_size_mb)
+
+    # Convert flag to None if not explicitly set, so implementation can determine default
+    keep_s2_col = True if keep_s2_column else None
+
+    partition_by_s2_impl(
+        input_parquet,
+        output_folder,
+        s2_name,
+        level,
+        hive,
+        overwrite,
+        preview,
+        preview_limit,
+        verbose,
+        keep_s2_col,
         force,
         skip_analysis,
         prefix,

@@ -1166,6 +1166,37 @@ class Table:
         )
         return Table(result, self._geometry_column)
 
+    def add_s2(
+        self,
+        column_name: str = "s2_cell",
+        level: int = 13,
+    ) -> Table:
+        """
+        Add an S2 cell column based on geometry location.
+
+        Uses Google's S2 spherical geometry library to compute cell IDs
+        from geometry centroids. Cell IDs are stored as hex tokens for portability.
+
+        Args:
+            column_name: Name for the S2 column (default: 's2_cell')
+            level: S2 level 0-30 (default: 13, ~1.2 km² cells)
+
+        Returns:
+            New Table with S2 column added
+
+        Example:
+            >>> table = gpio.read('data.parquet')
+            >>> table.add_s2(level=13).write('output.parquet')
+        """
+        from geoparquet_io.core.add_s2_column import add_s2_table
+
+        result = add_s2_table(
+            self._table,
+            s2_column_name=column_name,
+            level=level,
+        )
+        return Table(result, self._geometry_column)
+
     def add_kdtree(
         self,
         column_name: str = "kdtree_cell",
@@ -1358,6 +1389,53 @@ class Table:
             temp_prefix="gpio_part_h3",
             core_kwargs={
                 "resolution": resolution,
+                "hive": hive,
+                "overwrite": overwrite,
+            },
+            compression=compression,
+            collect_stats=True,
+        )
+
+    def partition_by_s2(
+        self,
+        output_dir: str | Path,
+        *,
+        level: int = 13,
+        compression: str = "ZSTD",
+        hive: bool = True,
+        overwrite: bool = False,
+    ) -> dict:
+        """
+        Partition the table into Hive-partitioned directory by S2 cell.
+
+        Uses Google's S2 spherical geometry library to partition data
+        by cell boundaries at the specified level.
+
+        Args:
+            output_dir: Output directory path
+            level: S2 level 0-30 (default: 13, ~1.2 km² cells)
+            compression: Compression codec (default: ZSTD)
+            hive: Use Hive-style partitioning (default: True)
+            overwrite: Overwrite existing output directory
+
+        Returns:
+            dict with partition statistics (file_count, etc.)
+
+        Example:
+            >>> table = gpio.read('data.parquet')
+            >>> stats = table.partition_by_s2('output/', level=10)
+            >>> print(f"Created {stats['file_count']} files")
+        """
+        from geoparquet_io.core.partition_by_s2 import partition_by_s2
+
+        return _run_partition_with_temp_file(
+            self._table,
+            self._geometry_column,
+            partition_by_s2,
+            output_dir,
+            temp_prefix="gpio_part_s2",
+            core_kwargs={
+                "level": level,
                 "hive": hive,
                 "overwrite": overwrite,
             },

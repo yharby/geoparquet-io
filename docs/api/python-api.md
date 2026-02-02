@@ -341,6 +341,21 @@ table = gpio.read('input.parquet').add_h3(resolution=6)
 table = gpio.read('input.parquet').add_h3(column_name='hex_id', resolution=8)
 ```
 
+#### `add_s2(column_name='s2_cell', level=13)`
+
+Add an S2 spherical cell column based on geometry location.
+
+```python
+# Default level (13, ~1.2 km² cells)
+table = gpio.read('input.parquet').add_s2()
+
+# Lower level for larger cells
+table = gpio.read('input.parquet').add_s2(level=10)
+
+# Custom column name
+table = gpio.read('input.parquet').add_s2(column_name='s2_index', level=15)
+```
+
 #### `add_kdtree(column_name='kdtree_cell', iterations=9, sample_size=100000)`
 
 Add a KD-tree cell column for data-adaptive spatial partitioning.
@@ -498,6 +513,16 @@ Partition the table into a Hive-partitioned directory by H3 cell.
 ```python
 # Partition by H3
 stats = table.partition_by_h3('output/', resolution=6)
+print(f"Created {stats['file_count']} files")
+```
+
+#### `partition_by_s2(output_dir, level=13, compression='ZSTD', hive=True, overwrite=False)`
+
+Partition the table into a Hive-partitioned directory by S2 cell.
+
+```python
+# Partition by S2
+stats = table.partition_by_s2('output/', level=10)
 print(f"Created {stats['file_count']} files")
 ```
 
@@ -819,6 +844,7 @@ pq.write_table(table, 'output.parquet')
 | `ops.add_bbox(table, column_name='bbox', geometry_column=None)` | Add bounding box column |
 | `ops.add_quadkey(table, column_name='quadkey', resolution=13, use_centroid=False, geometry_column=None)` | Add quadkey column |
 | `ops.add_h3(table, column_name='h3_cell', resolution=9, geometry_column=None)` | Add H3 cell column |
+| `ops.add_s2(table, column_name='s2_cell', level=13, geometry_column=None)` | Add S2 cell column |
 | `ops.add_kdtree(table, column_name='kdtree_cell', iterations=9, sample_size=100000, geometry_column=None)` | Add KD-tree cell column |
 | `ops.sort_hilbert(table, geometry_column=None)` | Reorder by Hilbert curve |
 | `ops.sort_column(table, column, descending=False)` | Sort by column(s) |

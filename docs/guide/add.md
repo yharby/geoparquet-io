@@ -128,6 +128,72 @@ gpio add h3 input.parquet output.parquet --resolution 13
 gpio add h3 input.parquet output.parquet --row-group-size-mb 256MB
 ```
 
+## S2 Spherical Cells
+
+Add [S2](https://s2geometry.io/) spherical cell IDs based on geometry centroids:
+
+=== "CLI"
+
+    ```bash
+    gpio add s2 input.parquet output.parquet --level 13
+
+    # From HTTPS to S3
+    gpio add s2 https://example.com/data.parquet s3://bucket/indexed.parquet --level 13
+    ```
+
+=== "Python"
+
+    ```python
+    import geoparquet_io as gpio
+
+    gpio.read('input.parquet').add_s2(level=13).write('output.parquet')
+
+    # Custom column name
+    gpio.read('input.parquet').add_s2(column_name='s2_index', level=18).write('output.parquet')
+    ```
+
+S2 uses Google's Spherical Geometry library which divides the Earth's surface into a hierarchy of cells using quadtree subdivision. Unlike H3's hexagonal grid, S2 cells are variable quads that provide hierarchical spatial indexing.
+
+**Level guide:**
+
+--8<-- "_includes/s2-levels.md"
+
+**Options:**
+
+```bash
+# Custom column name
+gpio add s2 input.parquet output.parquet --s2-name s2_index
+
+# Different level
+gpio add s2 input.parquet output.parquet --level 18
+
+# With row group sizing
+gpio add s2 input.parquet output.parquet --row-group-size-mb 256MB
+```
+
+### Technical Details
+
+S2 cell IDs are computed using DuckDB's geography extension:
+
+```sql
+s2_cell_token(
+    s2_cell_parent(
+        s2_cellfromlonlat(
+            ST_X(ST_Centroid(geometry)),
+            ST_Y(ST_Centroid(geometry))
+        ),
+        level
+    )
+)
+```
+
+- **s2_cellfromlonlat**: Converts lon/lat to S2 cell at maximum precision (level 30)
+- **s2_cell_parent**: Gets parent cell at desired level
+- **s2_cell_token**: Converts to hex token string for portability
+
+Cell IDs are stored as hex strings (e.g., `"89c25901"`) rather than integers for
+maximum portability across systems.
+
 ## KD-Tree Partitions
 
 Add balanced spatial partition IDs using KD-tree:

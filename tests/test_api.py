@@ -157,6 +157,25 @@ class TestTable:
         assert "my_h3" in result.column_names
         assert result.num_rows == 766
 
+    def test_add_s2(self, sample_table):
+        """Test add_s2() method."""
+        result = sample_table.add_s2()
+        assert isinstance(result, Table)
+        assert "s2_cell" in result.column_names
+        assert result.num_rows == 766
+
+    def test_add_s2_custom_level(self, sample_table):
+        """Test add_s2() with custom level."""
+        result = sample_table.add_s2(level=10)
+        assert "s2_cell" in result.column_names
+        assert result.num_rows == 766
+
+    def test_add_s2_custom_column_name(self, sample_table):
+        """Test add_s2() with custom column name."""
+        result = sample_table.add_s2(column_name="my_s2")
+        assert "my_s2" in result.column_names
+        assert result.num_rows == 766
+
     def test_add_kdtree(self, sample_table):
         """Test add_kdtree() method."""
         result = sample_table.add_kdtree()
@@ -535,6 +554,12 @@ class TestOpsNewFunctions:
         result = ops.add_h3(arrow_table, resolution=7)
         assert isinstance(result, pa.Table)
         assert "h3_cell" in result.column_names
+
+    def test_add_s2(self, arrow_table):
+        """Test ops.add_s2()."""
+        result = ops.add_s2(arrow_table, level=13)
+        assert isinstance(result, pa.Table)
+        assert "s2_cell" in result.column_names
 
     def test_add_kdtree(self, arrow_table):
         """Test ops.add_kdtree()."""

@@ -24,6 +24,7 @@ from geoparquet_io.core.add_bbox_column import add_bbox_table
 from geoparquet_io.core.add_h3_column import add_h3_table
 from geoparquet_io.core.add_kdtree_column import add_kdtree_table
 from geoparquet_io.core.add_quadkey_column import add_quadkey_table
+from geoparquet_io.core.add_s2_column import add_s2_table
 from geoparquet_io.core.extract import extract_table
 from geoparquet_io.core.hilbert_order import hilbert_order_table
 from geoparquet_io.core.reproject import reproject_table
@@ -215,6 +216,41 @@ def add_kdtree(
         kdtree_column_name=column_name,
         iterations=iterations,
         sample_size=sample_size,
+        geometry_column=geometry_column,
+    )
+
+
+def add_s2(
+    table: pa.Table,
+    column_name: str = "s2_cell",
+    level: int = 13,
+    geometry_column: str | None = None,
+) -> pa.Table:
+    """
+    Add an S2 cell column based on geometry location.
+
+    Uses Google's S2 spherical geometry library to compute cell IDs
+    from geometry centroids. Cell IDs are stored as hex tokens for portability.
+
+    Args:
+        table: Input PyArrow Table
+        column_name: Name for the S2 column (default: 's2_cell')
+        level: S2 level 0-30 (default: 13, ~1.2 km² cells)
+        geometry_column: Geometry column name (auto-detected if None)
+
+    Returns:
+        New table with S2 column added
+
+    Example:
+        >>> from geoparquet_io.api import ops
+        >>> table = pq.read_table('input.parquet')
+        >>> table = ops.add_s2(table, level=13)
+        >>> pq.write_table(table, 'output.parquet')
+    """
+    return add_s2_table(
+        table,
+        s2_column_name=column_name,
+        level=level,
         geometry_column=geometry_column,
     )
 
