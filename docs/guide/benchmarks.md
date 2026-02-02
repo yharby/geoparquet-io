@@ -134,11 +134,46 @@ python scripts/version_benchmark.py --version-label "test" --files small,medium 
 # Compare two result files
 python scripts/version_benchmark.py --compare results_baseline.json results_current.json
 
+# Analyze trends across multiple baselines (oldest to newest)
+python scripts/version_benchmark.py --trend results_v0.7.0.json results_v0.8.0.json results_v0.9.0.json
+
+# Customize degradation threshold for trend detection (default: 0.05 = 5%)
+python scripts/version_benchmark.py --trend baseline1.json baseline2.json baseline3.json --trend-threshold 0.10
+
 # Skip local caching (test remote file performance)
 python scripts/version_benchmark.py --version-label "remote-test" --no-cache
 ```
 
+### Managing Historical Baselines
+
+Use the `scripts/manage_baselines.py` tool to work with baselines stored in GitHub artifacts:
+
+```bash
+# List available baselines
+python scripts/manage_baselines.py list
+
+# Download specific baseline versions
+python scripts/manage_baselines.py download v0.9.0 v0.8.0
+
+# Compare specific baselines (downloads if needed)
+python scripts/manage_baselines.py compare v0.8.0 v0.9.0
+
+# Analyze trends across multiple versions
+python scripts/manage_baselines.py trends v0.7.0 v0.8.0 v0.9.0
+
+# Use custom degradation threshold
+python scripts/manage_baselines.py trends v0.7.0 v0.8.0 v0.9.0 --threshold 0.10
+```
+
+**Authentication:**
+- Requires GitHub token: set `GITHUB_TOKEN` or authenticate with `gh auth login`
+- Auto-detects repository from git remote
+- Downloads baselines to `baselines/` directory by default
+```
+
 ### Sample Output
+
+**Point-in-time comparison:**
 
 ```
 ======================================================================
@@ -151,6 +186,33 @@ inspect                   tiny     0.468s       0.440s       -5.8% faster
 extract-limit             tiny     0.543s       0.540s       -0.5% faster
 add-bbox                  large    0.378s       0.408s       +8.1% slower
 sort-hilbert              large    27.366s      26.946s      -1.5% faster
+```
+
+**Trend analysis across releases:**
+
+```
+======================================================================
+Trend Analysis Across Releases
+======================================================================
+Versions: v0.7.0 → v0.8.0 → v0.9.0
+Baselines: 3
+Operations tracked: 42
+
+Overall Statistics:
+  Average change: +1.23%
+  Max regression: +12.5%
+  Max improvement: -8.3%
+
+⚠️  Gradual Degradation Detected (2 operations):
+----------------------------------------------------------------------
+  • extract-limit (small): 7.2% avg degradation over last 2 releases
+  • partition-quadkey (medium): 6.1% avg degradation over last 2 releases
+
+🚀 Consistent Improvements (3 operations):
+----------------------------------------------------------------------
+  • add-bbox (large): 8.5% avg improvement over last 2 releases
+  • sort-hilbert (small): 5.9% avg improvement over last 2 releases
+  • inspect (tiny): 5.2% avg improvement over last 2 releases
 ```
 
 ### CLI Benchmark Commands
@@ -195,12 +257,22 @@ When a release is created, benchmarks automatically:
 1. Run on the new release version
 2. Compare against the previous release tag
 3. Detect regressions (>25% slower)
-4. Append results to the release notes
+4. Fetch historical baselines from up to 5 previous releases
+5. Analyze performance trends across releases
+6. Append results to the release notes
 
 **Results include:**
-- Comparison table showing performance delta
-- Warning for any significant regressions
+- Point-in-time comparison table showing performance delta
+- Performance trends across multiple releases
+- Warning for significant regressions (>25% in single release)
+- Warning for gradual degradation (>5% per release for 2+ consecutive releases)
 - Detailed benchmark data in collapsible section
+
+**Baseline Storage:**
+- Baselines are stored as GitHub Actions artifacts
+- Retention: 400 days (covers ~5-10 releases)
+- Artifact naming: `release-benchmark-{version}`
+- Contains: benchmark results JSON, comparison text, trend analysis
 
 ### Where Results Are Published
 
@@ -216,11 +288,23 @@ All runs also upload JSON artifacts for historical tracking.
 
 ### Regression Thresholds
 
+**Point-in-time (single release comparison):**
+
 | Severity | Threshold | Action |
 |----------|-----------|--------|
 | Normal variance | ±10% | No action needed |
 | Warning | +10-25% | Investigate cause |
 | Regression | >+25% | Flagged in release notes |
+
+**Trend analysis (across multiple releases):**
+
+| Pattern | Threshold | Action |
+|---------|-----------|--------|
+| Gradual degradation | >5% per release for 2+ consecutive releases | Warning flagged |
+| Consistent improvement | >5% per release for 2+ consecutive releases | Highlighted |
+| Single spike | One-time regression/improvement | Ignored (not a trend) |
+
+Trend analysis helps detect gradual performance drift that might be missed when comparing only adjacent releases.
 
 ### Expected Variance
 
