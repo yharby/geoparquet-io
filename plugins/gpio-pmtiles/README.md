@@ -54,6 +54,10 @@ gpio pmtiles create data.parquet tiles.pmtiles \
 # With CRS override (if metadata is incorrect)
 gpio pmtiles create data.parquet tiles.pmtiles \
   --src-crs EPSG:3857
+
+# With custom attribution
+gpio pmtiles create data.parquet tiles.pmtiles \
+  --attribution '<a href="https://example.com">My Data Source</a>'
 ```
 
 ### Python API
@@ -88,6 +92,14 @@ create_pmtiles_from_geoparquet(
     src_crs="EPSG:3857",  # Reproject from Web Mercator to WGS84
     verbose=True
 )
+
+# With custom attribution
+create_pmtiles_from_geoparquet(
+    input_path="data.parquet",
+    output_path="tiles.pmtiles",
+    attribution='<a href="https://example.com">My Data Source</a>',
+    verbose=True
+)
 ```
 
 ## How It Works
@@ -110,6 +122,7 @@ But with integrated filtering, smart defaults, and better error handling.
 - `--include-cols`: Comma-separated list of columns to include
 - `--precision`: Coordinate decimal precision (default: 6 for ~10cm accuracy)
 - `--src-crs`: Override source CRS if metadata is incorrect (e.g., EPSG:3857, EPSG:32719)
+- `--attribution`: Attribution HTML for the tiles (default: geoparquet-io link)
 - `--verbose` / `-v`: Enable verbose output
 - `--profile`: AWS profile for S3 files
 
