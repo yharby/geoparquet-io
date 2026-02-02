@@ -260,36 +260,6 @@ jobs:
           cat comparison.txt >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
-      - name: Add trend analysis to summary
-        if: steps.trends.outputs.warnings != ''
-        run: |
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📊 Performance Trends" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          if [[ -f trend_analysis.json ]]; then
-            # Extract and display trend statistics
-            uv run python -c "
-            import json
-            with open('trend_analysis.json') as f:
-                trends = json.load(f)
-
-            print(f\"Analyzed {trends['baselines_count']} releases: {' → '.join(trends['versions'])}\")
-            print()
-
-            stats = trends['statistics']
-            print(f\"- Average change: {stats['avg_change_pct']:+.2f}%\")
-            print(f\"- Max regression: {stats['max_regression_pct']:+.1f}%\")
-            print(f\"- Max improvement: {stats['max_improvement_pct']:+.1f}%\")
-            print()
-
-            if trends['warnings']:
-                print('**⚠️ Gradual Degradation Detected:**')
-                for w in trends['warnings']:
-                    print(f\"- {w['message']}\")
-            " >> $GITHUB_STEP_SUMMARY
-          fi
-
       - name: Analyze trends across releases
         id: trends
         if: steps.download-baselines.outputs.baseline_count > 0
@@ -331,6 +301,36 @@ jobs:
             cat trend_warnings.txt
             echo "EOF"
           } >> $GITHUB_OUTPUT
+
+      - name: Add trend analysis to summary
+        if: steps.trends.outputs.warnings != '' && steps.trends.outputs.warnings != 'none'
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Performance Trends" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [[ -f trend_analysis.json ]]; then
+            # Extract and display trend statistics
+            uv run python -c "
+            import json
+            with open('trend_analysis.json') as f:
+                trends = json.load(f)
+
+            print(f\"Analyzed {trends['baselines_count']} releases: {' → '.join(trends['versions'])}\")
+            print()
+
+            stats = trends['statistics']
+            print(f\"- Average change: {stats['avg_change_pct']:+.2f}%\")
+            print(f\"- Max regression: {stats['max_regression_pct']:+.1f}%\")
+            print(f\"- Max improvement: {stats['max_improvement_pct']:+.1f}%\")
+            print()
+
+            if trends['warnings']:
+                print('**⚠️ Gradual Degradation Detected:**')
+                for w in trends['warnings']:
+                    print(f\"- {w['message']}\")
+            " >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Upload results
         uses: actions/upload-artifact@v6
