@@ -70,6 +70,10 @@ def pmtiles():
     "--src-crs",
     help="Source CRS if metadata is incorrect. Will reproject from this CRS to WGS84. Example: 'EPSG:32719'",
 )
+@click.option(
+    "--attribution",
+    help="Attribution HTML for the tiles. Defaults to geoparquet-io link.",
+)
 def create(
     input_file,
     output_file,
@@ -83,6 +87,7 @@ def create(
     verbose,
     profile,
     src_crs,
+    attribution,
 ):
     """Create PMTiles from GeoParquet file.
 
@@ -129,6 +134,7 @@ def create(
             verbose=verbose,
             profile=profile,
             src_crs=src_crs,
+            attribution=attribution,
         )
     except Exception as e:
         raise click.ClickException(str(e)) from e
