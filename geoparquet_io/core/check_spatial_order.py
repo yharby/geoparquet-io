@@ -10,6 +10,27 @@ from geoparquet_io.core.common import (
 from geoparquet_io.core.logging_config import debug, progress
 
 
+def _bboxes_overlap(bbox1: dict, bbox2: dict) -> bool:
+    """Check if two bounding boxes overlap.
+
+    Two bounding boxes overlap if they share any interior area.
+    Boxes that only touch at edges or corners are not considered overlapping.
+
+    Args:
+        bbox1: First bbox dict with xmin, ymin, xmax, ymax
+        bbox2: Second bbox dict with xmin, ymin, xmax, ymax
+
+    Returns:
+        True if bboxes overlap, False otherwise
+    """
+    # Boxes overlap if they overlap in BOTH X and Y dimensions
+    # X overlap: bbox1.xmax > bbox2.xmin AND bbox2.xmax > bbox1.xmin
+    # Y overlap: bbox1.ymax > bbox2.ymin AND bbox2.ymax > bbox1.ymin
+    x_overlap = bbox1["xmax"] > bbox2["xmin"] and bbox2["xmax"] > bbox1["xmin"]
+    y_overlap = bbox1["ymax"] > bbox2["ymin"] and bbox2["ymax"] > bbox1["ymin"]
+    return x_overlap and y_overlap
+
+
 def _calculate_consecutive_avg(con, safe_url, geometry_column, row_limit, verbose):
     """Calculate average distance between consecutive features."""
     query = f"""
