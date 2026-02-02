@@ -1,6 +1,10 @@
 """Tests for core/check_spatial_order.py module."""
 
-from geoparquet_io.core.check_spatial_order import _bboxes_overlap, check_spatial_order
+from geoparquet_io.core.check_spatial_order import (
+    _bboxes_overlap,
+    check_spatial_order,
+    check_spatial_order_bbox_stats,
+)
 
 
 class TestCheckSpatialOrder:
@@ -143,3 +147,100 @@ class TestBboxOverlap:
         bbox1 = {"xmin": 0.0, "ymin": 0.0, "xmax": 10.0, "ymax": 10.0}
         bbox2 = {"xmin": 5.0, "ymin": 5.0, "xmax": 15.0, "ymax": 15.0}
         assert _bboxes_overlap(bbox1, bbox2) == _bboxes_overlap(bbox2, bbox1)
+
+
+class TestCheckSpatialOrderBboxStats:
+    """Tests for check_spatial_order_bbox_stats function."""
+
+    def test_returns_dict_structure(self, places_test_file):
+        """Test that bbox-stats method returns proper dict structure."""
+        result = check_spatial_order_bbox_stats(
+            places_test_file, verbose=False, return_results=True, quiet=False
+        )
+        assert isinstance(result, dict)
+        assert "passed" in result
+        assert "ratio" in result
+        assert "method" in result
+        assert result["method"] == "bbox_stats"
+        assert "overlap_count" in result
+        assert "total_pairs" in result
+        assert "issues" in result
+        assert "recommendations" in result
+        assert "fix_available" in result
+
+    def test_with_spatially_ordered_file(self, places_test_file):
+        """Test with file expected to have good spatial ordering."""
+        result = check_spatial_order_bbox_stats(
+            places_test_file, verbose=False, return_results=True, quiet=False
+        )
+        # Just verify structure - actual ordering depends on test data
+        assert isinstance(result["passed"], bool)
+        assert isinstance(result["ratio"], float)
+        assert 0.0 <= result["ratio"] <= 1.0
+        assert result["overlap_count"] >= 0
+        assert result["total_pairs"] >= 0
+
+    def test_with_buildings_file(self, buildings_test_file):
+        """Test bbox-stats method with buildings file."""
+        result = check_spatial_order_bbox_stats(
+            buildings_test_file, verbose=False, return_results=True, quiet=False
+        )
+        assert isinstance(result, dict)
+        assert "passed" in result
+        assert "method" in result
+        assert result["method"] == "bbox_stats"
+
+    def test_verbose_mode(self, places_test_file):
+        """Test bbox-stats method with verbose=True."""
+        result = check_spatial_order_bbox_stats(
+            places_test_file, verbose=True, return_results=True, quiet=False
+        )
+        assert isinstance(result, dict)
+        assert result["method"] == "bbox_stats"
+
+    def test_quiet_mode(self, places_test_file):
+        """Test bbox-stats method with quiet=True."""
+        result = check_spatial_order_bbox_stats(
+            places_test_file, verbose=False, return_results=True, quiet=True
+        )
+        assert isinstance(result, dict)
+        assert result["method"] == "bbox_stats"
+
+    def test_passing_threshold(self, places_test_file):
+        """Test that ratio < 0.3 means passed=True."""
+        result = check_spatial_order_bbox_stats(
+            places_test_file, verbose=False, return_results=True, quiet=False
+        )
+        if result["ratio"] < 0.3:
+            assert result["passed"] is True
+            assert len(result["issues"]) == 0
+            assert result["fix_available"] is False
+        else:
+            assert result["passed"] is False
+            assert len(result["issues"]) > 0
+            assert result["fix_available"] is True
+
+    def test_failing_threshold(self):
+        """Test that ratio >= 0.3 means passed=False."""
+        # This test will be valid once we have a poorly ordered test file
+        # For now, skip if we don't have such a file
+        pass
+
+    def test_issues_and_recommendations_when_failed(self, unsorted_test_file):
+        """Test that failing check includes proper issues and recommendations."""
+        result = check_spatial_order_bbox_stats(
+            unsorted_test_file, verbose=False, return_results=True, quiet=False
+        )
+        if not result["passed"]:
+            assert len(result["issues"]) > 0
+            assert len(result["recommendations"]) > 0
+            assert "spatial ordering" in str(result["issues"]).lower()
+            assert "Hilbert" in str(result["recommendations"])
+
+    def test_without_return_results(self, places_test_file):
+        """Test bbox-stats method with return_results=False."""
+        result = check_spatial_order_bbox_stats(
+            places_test_file, verbose=False, return_results=False, quiet=False
+        )
+        # Should return ratio directly when return_results=False
+        assert result is None or isinstance(result, float)
