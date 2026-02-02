@@ -257,7 +257,9 @@ def _run_chain_filter_reproject_partition(input_path: Path, output_dir: Path) ->
 
     # Step 3: Partition by quadkey (requires WGS84)
     partition_output = output_dir / "partitioned"
-    partition_by_quadkey(str(step2b_output), str(partition_output), partition_resolution=4)
+    partition_by_quadkey(
+        str(step2b_output), str(partition_output), resolution=4, partition_resolution=4
+    )
     output_files = list(Path(partition_output).glob("**/*.parquet"))
 
     return {
