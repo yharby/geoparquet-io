@@ -72,7 +72,7 @@ def _calculate_random_avg(con, safe_url, geometry_column, row_limit, random_samp
 
 
 def _build_results_dict(ratio, consecutive_avg, random_avg):
-    """Build structured results dictionary."""
+    """Build structured results dictionary for sampling method."""
     passed = ratio is not None and ratio < 0.5
     issues = []
     recommendations = []
@@ -84,6 +84,7 @@ def _build_results_dict(ratio, consecutive_avg, random_avg):
         "ratio": ratio,
         "consecutive_avg": consecutive_avg,
         "random_avg": random_avg,
+        "method": "sampling",
         "issues": issues,
         "recommendations": recommendations,
         "fix_available": not passed,
@@ -228,10 +229,13 @@ def check_spatial_order(
 ):
     """Check if a GeoParquet file is spatially ordered.
 
+    Automatically detects if the file has a bbox column (GeoParquet 2.0+) and uses
+    the faster bbox-stats method. Falls back to sampling method for older files.
+
     Args:
         parquet_file: Path to parquet file
-        random_sample_size: Number of rows in each random sample
-        limit_rows: Max number of rows to analyze
+        random_sample_size: Number of rows in each random sample (sampling method only)
+        limit_rows: Max number of rows to analyze (sampling method only)
         verbose: Print additional information
         return_results: If True, return structured results dict
         quiet: If True, suppress all output (for multi-file batch mode)
@@ -239,10 +243,36 @@ def check_spatial_order(
     Returns:
         ratio (float) if return_results=False, or dict if return_results=True
     """
+    from geoparquet_io.core.duckdb_metadata import has_bbox_column
+    from geoparquet_io.core.logging_config import warn
+
     safe_url = safe_file_url(parquet_file, verbose)
+
+    # Try bbox-stats method first (faster)
+    has_bbox, bbox_col_name = has_bbox_column(safe_url)
+    if has_bbox and bbox_col_name:
+        if verbose:
+            debug(f"Using bbox-stats method (bbox column: {bbox_col_name})")
+        try:
+            return check_spatial_order_bbox_stats(
+                parquet_file, verbose=verbose, return_results=return_results, quiet=quiet
+            )
+        except Exception as e:
+            if verbose:
+                warn(f"Bbox-stats method failed: {e}, falling back to sampling")
+            # Fall through to sampling method
+
+    # Fall back to sampling method
+    if verbose or not quiet:
+        warn(
+            "Bbox column not found - using slower sampling method. "
+            "For faster checks, add bbox column with 'gpio add bbox'."
+        )
+
     geometry_column = find_primary_geometry_column(parquet_file, verbose)
     if verbose:
         debug(f"Using geometry column: {geometry_column}")
+        debug("Using sampling method")
 
     con = get_duckdb_connection(load_spatial=True, load_httpfs=needs_httpfs(parquet_file))
     try:
