@@ -32,9 +32,12 @@ def _get_total_row_count(
     from geoparquet_io.core.common import setup_aws_profile_if_needed
 
     input_url = safe_file_url(input_parquet, verbose)
-    con = get_duckdb_connection(load_spatial=True, load_httpfs=needs_httpfs(input_parquet))
 
+    # Create connection inside try block to ensure cleanup on any error
+    con = None
     try:
+        con = get_duckdb_connection(load_spatial=True, load_httpfs=needs_httpfs(input_parquet))
+
         # Setup S3 authentication if profile specified
         if profile:
             setup_aws_profile_if_needed(con, profile)
@@ -43,7 +46,8 @@ def _get_total_row_count(
         result = con.execute(query).fetchone()
         return result[0] if result else 0
     finally:
-        con.close()
+        if con is not None:
+            con.close()
 
 
 def _calculate_h3_resolution(
