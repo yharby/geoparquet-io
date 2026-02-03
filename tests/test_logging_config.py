@@ -183,13 +183,17 @@ class TestHelperFunctions:
         """Set up logging for each test with propagation enabled for caplog."""
         logger = get_logger()
         original_propagate = logger.propagate
+        original_level = logger.level
+        original_handlers = logger.handlers.copy()
         logger.setLevel(logging.DEBUG)
         logger.handlers.clear()
         logger.propagate = True  # Enable propagation for caplog to work
         yield
-        # Clean up
+        # Clean up - restore original state
         logger.handlers.clear()
+        logger.handlers.extend(original_handlers)
         logger.propagate = original_propagate
+        logger.setLevel(original_level)
 
     def test_success_logs_info_with_marker(self, caplog):
         """success() should log at INFO level with SUCCESS marker."""
