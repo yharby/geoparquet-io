@@ -20,15 +20,16 @@ from geoparquet_io.core.common import safe_file_url
 from geoparquet_io.core.constants import (
     DEFAULT_S2_COLUMN_NAME,
     DEFAULT_S2_COMPRESSION_LEVEL,
-    DEFAULT_S2_LEVEL,
 )
 from geoparquet_io.core.logging_config import (
     configure_verbose,
     debug,
+    info,
     progress,
     success,
     warn,
 )
+from geoparquet_io.core.partition_auto_resolution import calculate_auto_resolution
 from geoparquet_io.core.partition_common import (
     calculate_partition_stats,
     partition_by_column,
@@ -166,7 +167,7 @@ def partition_by_s2(
     input_parquet: str,
     output_folder: str,
     s2_column_name: str = DEFAULT_S2_COLUMN_NAME,
-    level: int = DEFAULT_S2_LEVEL,
+    level: int | None = None,
     hive: bool = False,
     overwrite: bool = False,
     preview: bool = False,
@@ -183,6 +184,9 @@ def partition_by_s2(
     row_group_size_mb: int | None = None,
     row_group_rows: int | None = None,
     memory_limit: str | None = None,
+    auto: bool = False,
+    target_rows: int = 100000,
+    max_partitions: int = 10000,
 ) -> None:
     """
     Partition a GeoParquet file by S2 cells at specified level.
@@ -190,11 +194,16 @@ def partition_by_s2(
     Supports Arrow IPC streaming for input:
     - Input "-" reads from stdin (output is always a directory)
 
+    Auto-resolution mode:
+    - Use --auto to automatically calculate optimal level based on data size
+    - Specify --target-rows to control partition size (default: 100,000 rows)
+    - Specify --max-partitions to limit total partition count (default: 10,000)
+
     Args:
         input_parquet: Input GeoParquet file (local, remote URL, or "-" for stdin)
         output_folder: Output directory (always writes to directory, no stdout support)
         s2_column_name: Name of the S2 column (default: 's2_cell')
-        level: S2 level (0-30). Default: 13
+        level: S2 level (0-30). Required unless --auto is used
         hive: Use Hive-style partitioning (column=value directories)
         overwrite: Overwrite existing output directory
         preview: Preview partition distribution without writing
@@ -211,22 +220,54 @@ def partition_by_s2(
         row_group_size_mb: Row group size in MB (mutually exclusive with row_group_rows)
         row_group_rows: Row group size in number of rows (mutually exclusive with row_group_size_mb)
         memory_limit: DuckDB memory limit for write operations (e.g., "2GB")
+        auto: Automatically calculate optimal level (default: False)
+        target_rows: Target rows per partition for auto mode (default: 100000)
+        max_partitions: Maximum partitions for auto mode (default: 10000)
     """
     configure_verbose(verbose)
 
-    if not 0 <= level <= 30:
-        raise click.UsageError(f"S2 level must be between 0 and 30, got {level}")
-
-    if keep_s2_column is None:
-        keep_s2_column = hive
-
-    # Handle stdin input
+    # Handle stdin input first (before level calculation)
     stdin_temp_file = None
     actual_input = input_parquet
 
     if is_stdin(input_parquet):
         stdin_temp_file = read_stdin_to_temp_file(verbose)
         actual_input = stdin_temp_file
+
+    # Validate level parameter
+    if auto and level is not None:
+        raise click.UsageError("Cannot specify both --auto and --level")
+
+    if not auto and level is None:
+        raise click.UsageError("Must specify either --level or --auto")
+
+    # Calculate auto level if requested
+    if auto:
+        try:
+            level = calculate_auto_resolution(
+                input_parquet=actual_input,
+                spatial_index_type="s2",
+                target_rows_per_partition=target_rows,
+                max_partitions=max_partitions,
+                min_resolution=0,
+                max_resolution=30,
+                verbose=verbose,
+                profile=profile,
+            )
+            info(f"Auto-calculated S2 level: {level}")
+        except Exception as e:
+            if stdin_temp_file and os.path.exists(stdin_temp_file):
+                os.remove(stdin_temp_file)
+            raise click.ClickException(f"Auto-resolution calculation failed: {str(e)}") from e
+
+    # Validate resolved level
+    if not 0 <= level <= 30:
+        if stdin_temp_file and os.path.exists(stdin_temp_file):
+            os.remove(stdin_temp_file)
+        raise click.UsageError(f"S2 level must be between 0 and 30, got {level}")
+
+    if keep_s2_column is None:
+        keep_s2_column = hive
 
     try:
         working_parquet, column_existed, temp_file = _ensure_s2_column(

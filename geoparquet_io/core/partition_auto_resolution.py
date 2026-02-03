@@ -34,15 +34,16 @@ def _get_total_row_count(
     input_url = safe_file_url(input_parquet, verbose)
     con = get_duckdb_connection(load_spatial=True, load_httpfs=needs_httpfs(input_parquet))
 
-    # Setup S3 authentication if profile specified
-    if profile:
-        setup_aws_profile_if_needed(con, profile)
+    try:
+        # Setup S3 authentication if profile specified
+        if profile:
+            setup_aws_profile_if_needed(con, profile)
 
-    query = f"SELECT COUNT(*) FROM '{input_url}'"
-    result = con.execute(query).fetchone()
-    con.close()
-
-    return result[0] if result else 0
+        query = f"SELECT COUNT(*) FROM '{input_url}'"
+        result = con.execute(query).fetchone()
+        return result[0] if result else 0
+    finally:
+        con.close()
 
 
 def _calculate_h3_resolution(
@@ -111,11 +112,14 @@ def _calculate_h3_resolution(
 
     if verbose:
         estimated_partitions = 122 * (7**resolution)
-        estimated_rows_per_partition = total_rows / estimated_partitions
-        info(
-            f"H3 auto-resolution: {resolution} "
-            f"(~{estimated_partitions:.0f} partitions, ~{estimated_rows_per_partition:.0f} rows/partition)"
-        )
+        if estimated_partitions > 0:
+            estimated_rows_per_partition = total_rows / estimated_partitions
+            info(
+                f"H3 auto-resolution: {resolution} "
+                f"(~{estimated_partitions:.0f} partitions, ~{estimated_rows_per_partition:.0f} rows/partition)"
+            )
+        else:
+            info(f"H3 auto-resolution: {resolution}")
 
     return resolution
 
@@ -184,11 +188,14 @@ def _calculate_quadkey_resolution(
 
     if verbose:
         estimated_partitions = 4**resolution
-        estimated_rows_per_partition = total_rows / estimated_partitions
-        info(
-            f"Quadkey auto-resolution: {resolution} "
-            f"(~{estimated_partitions:.0f} partitions, ~{estimated_rows_per_partition:.0f} rows/partition)"
-        )
+        if estimated_partitions > 0:
+            estimated_rows_per_partition = total_rows / estimated_partitions
+            info(
+                f"Quadkey auto-resolution: {resolution} "
+                f"(~{estimated_partitions:.0f} partitions, ~{estimated_rows_per_partition:.0f} rows/partition)"
+            )
+        else:
+            info(f"Quadkey auto-resolution: {resolution}")
 
     return resolution
 
@@ -261,11 +268,14 @@ def _calculate_a5_resolution(
 
     if verbose:
         estimated_partitions = 6 * (4**resolution)
-        estimated_rows_per_partition = total_rows / estimated_partitions
-        info(
-            f"{index_name} auto-resolution: {resolution} "
-            f"(~{estimated_partitions:.0f} partitions, ~{estimated_rows_per_partition:.0f} rows/partition)"
-        )
+        if estimated_partitions > 0:
+            estimated_rows_per_partition = total_rows / estimated_partitions
+            info(
+                f"{index_name} auto-resolution: {resolution} "
+                f"(~{estimated_partitions:.0f} partitions, ~{estimated_rows_per_partition:.0f} rows/partition)"
+            )
+        else:
+            info(f"{index_name} auto-resolution: {resolution}")
 
     return resolution
 

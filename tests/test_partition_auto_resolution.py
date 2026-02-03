@@ -13,16 +13,24 @@ from geoparquet_io.core.partition_auto_resolution import (
 
 
 class TestH3ResolutionCalculation:
-    """Test H3 auto-resolution calculation logic."""
+    """Test H3 auto-resolution calculation logic.
+
+    Note on test tolerances: We use 2-3 resolution level tolerance ranges because:
+    1. The algorithm uses rounding, which can shift results by ±1 resolution
+    2. Spatial data is rarely uniformly distributed, so exact math is theoretical
+    3. Different resolution levels within tolerance provide valid partitioning
+    The goal is to verify the algorithm produces sensible results, not exact values.
+    """
 
     def test_calculate_h3_resolution_small_dataset(self):
         """Small dataset should use low resolution."""
         # 10K rows, want ~1K per partition = ~10 partitions
         # H3 has ~122 cells at res 0, so res 0 should be fine
+        # Tolerance: res 0-2 because 122 cells at res 0 already exceeds 10 target
         resolution = _calculate_h3_resolution(
             total_rows=10000, target_rows_per_partition=1000, verbose=False
         )
-        assert 0 <= resolution <= 2  # Should be very low resolution
+        assert 0 <= resolution <= 2  # Low resolution range is acceptable
 
     def test_calculate_h3_resolution_medium_dataset(self):
         """Medium dataset should use medium resolution."""
@@ -94,7 +102,11 @@ class TestH3ResolutionCalculation:
 
 
 class TestQuadkeyResolutionCalculation:
-    """Test quadkey auto-resolution calculation logic."""
+    """Test quadkey auto-resolution calculation logic.
+
+    Note on test tolerances: See TestH3ResolutionCalculation docstring.
+    Quadkey uses power-of-4 progression, so tolerances account for rounding.
+    """
 
     def test_calculate_quadkey_resolution_small_dataset(self):
         """Small dataset should use low zoom level."""
@@ -169,7 +181,11 @@ class TestQuadkeyResolutionCalculation:
 
 
 class TestA5ResolutionCalculation:
-    """Test A5 auto-resolution calculation logic."""
+    """Test A5 auto-resolution calculation logic.
+
+    Note on test tolerances: See TestH3ResolutionCalculation docstring.
+    A5/S2 uses power-of-4 progression with 6 base cells.
+    """
 
     def test_calculate_a5_resolution_small_dataset(self):
         """Small dataset should use low resolution."""
@@ -243,7 +259,11 @@ class TestA5ResolutionCalculation:
 
 
 class TestS2ResolutionCalculation:
-    """Test S2 auto-resolution calculation logic."""
+    """Test S2 auto-resolution calculation logic.
+
+    Note on test tolerances: See TestH3ResolutionCalculation docstring.
+    S2 uses the same math as A5 (power-of-4 with 6 base cells).
+    """
 
     def test_calculate_s2_resolution_small_dataset(self):
         """Small dataset should use low level."""
