@@ -40,6 +40,14 @@ Auto-generated API reference for core functions.
 
 ::: geoparquet_io.core.partition_by_kdtree.partition_by_kdtree
 
+### find_large_files
+
+::: geoparquet_io.core.sub_partition.find_large_files
+
+### sub_partition_directory
+
+::: geoparquet_io.core.sub_partition.sub_partition_directory
+
 ## Validation
 
 ### check_all

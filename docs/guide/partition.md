@@ -668,6 +668,17 @@ gpio partition h3 large.parquet --resolution 8 --preview
 gpio partition h3 large.parquet output/ --resolution 8
 ```
 
+## Sub-Partitioning Large Files
+
+After partitioning by admin boundaries or string columns, some files may still be too large. Use `--min-size` with directory input to sub-partition only the oversized files:
+
+```bash
+# Sub-partition files >100MB with H3
+gpio partition h3 by_country/ --min-size 100MB --resolution 7 --in-place
+```
+
+See [Sub-Partitioning Large Files](sub-partitioning.md) for details.
+
 ## See Also
 
 - [CLI Reference: partition](../cli/partition.md)

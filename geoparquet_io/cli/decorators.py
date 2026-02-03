@@ -290,9 +290,9 @@ def write_strategy_option(func):
     )(func)
 
 
-def partition_options(func):
+def partition_options_base(func):
     """
-    Add standard partitioning options to a command.
+    Add base partitioning options to a command (without directory sub-partitioning).
 
     Adds:
     - --preview: Analyze and preview without creating files
@@ -331,6 +331,28 @@ def partition_options(func):
         help="Skip partition strategy analysis (for performance-sensitive cases)",
     )(func)
     func = prefix_option(func)
+    return func
+
+
+def partition_options(func):
+    """
+    Add standard partitioning options to a command with directory sub-partitioning support.
+
+    Adds all base partition options plus:
+    - --min-size: Only process files larger than this size (for directory input)
+    - --in-place: Replace original files with sub-partitions
+    """
+    func = partition_options_base(func)
+    func = click.option(
+        "--min-size",
+        default=None,
+        help="Only process files larger than this size when input is a directory (e.g., '100MB', '1GB')",
+    )(func)
+    func = click.option(
+        "--in-place",
+        is_flag=True,
+        help="Replace original files with sub-partitions (requires directory input with --min-size)",
+    )(func)
     return func
 
 
@@ -495,3 +517,100 @@ class SingleFileCommand(GlobAwareCommand):
     """
 
     supports_glob = False
+
+
+def handle_directory_sub_partition(
+    input_parquet: str,
+    partition_type: str,
+    min_size: str | None,
+    resolution: int | None = None,
+    level: int | None = None,
+    in_place: bool = False,
+    hive: bool = False,
+    overwrite: bool = False,
+    verbose: bool = False,
+    force: bool = False,
+    skip_analysis: bool = True,
+    compression: str | None = None,
+    compression_level: int | None = None,
+    auto: bool = False,
+    target_rows: int = 100000,
+    max_partitions: int = 10000,
+) -> bool:
+    """
+    Handle directory input with --min-size for partition commands.
+
+    This function checks if the input is a directory and processes it with
+    sub_partition_directory if --min-size is provided. It's extracted as a
+    shared helper to avoid code duplication across partition commands.
+
+    Args:
+        input_parquet: Path to input file or directory
+        partition_type: Type of partition ("h3", "s2", "quadkey")
+        min_size: Size threshold string (e.g., "100MB") or None
+        resolution: Resolution for H3/quadkey
+        level: Level for S2
+        in_place: Delete originals after sub-partition
+        hive: Use Hive-style partitioning
+        overwrite: Overwrite existing output
+        verbose: Print verbose output
+        force: Force operation with warnings
+        skip_analysis: Skip partition analysis
+        compression: Compression codec
+        compression_level: Compression level
+        auto: Auto-calculate resolution
+        target_rows: Target rows per partition (auto mode)
+        max_partitions: Max partitions (auto mode)
+
+    Returns:
+        True if directory was handled, False if it's a file (continue to single-file logic)
+
+    Raises:
+        click.UsageError: If directory input provided without --min-size
+    """
+    import os
+
+    if not os.path.isdir(input_parquet):
+        return False
+
+    if not min_size:
+        raise click.UsageError(
+            "Directory input requires --min-size to specify which files to process"
+        )
+
+    from geoparquet_io.core.common import parse_size_string
+    from geoparquet_io.core.logging_config import warn
+    from geoparquet_io.core.sub_partition import sub_partition_directory
+
+    try:
+        min_size_bytes = parse_size_string(min_size)
+    except ValueError as e:
+        raise click.UsageError(str(e)) from None
+
+    try:
+        result = sub_partition_directory(
+            directory=input_parquet,
+            partition_type=partition_type,
+            min_size_bytes=min_size_bytes,
+            resolution=resolution,
+            level=level,
+            in_place=in_place,
+            hive=hive,
+            overwrite=overwrite,
+            verbose=verbose,
+            force=force,
+            skip_analysis=skip_analysis,
+            compression=compression.upper() if compression else "ZSTD",
+            compression_level=compression_level or 15,
+            auto=auto,
+            target_rows=target_rows,
+            max_partitions=max_partitions,
+        )
+    except ValueError as e:
+        raise click.UsageError(str(e)) from None
+
+    if result["errors"]:
+        for err in result["errors"]:
+            warn(f"Error processing {err['file']}: {err['error']}")
+
+    return True

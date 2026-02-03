@@ -1,0 +1,312 @@
+"""Tests for sub-partition functionality."""
+
+import os
+import shutil
+import tempfile
+
+import pyarrow as pa
+import pyarrow.parquet as pq
+import pytest
+from click.testing import CliRunner
+
+from geoparquet_io.cli.main import partition
+
+
+@pytest.fixture
+def cli_runner():
+    return CliRunner()
+
+
+@pytest.fixture
+def temp_partition_dir():
+    """Create a temp directory with parquet files of varying sizes."""
+    temp_dir = tempfile.mkdtemp()
+    yield temp_dir
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+class TestMinSizeOption:
+    """Test --min-size option parsing."""
+
+    def test_min_size_option_exists(self, cli_runner):
+        """Verify --min-size option is recognized."""
+        result = cli_runner.invoke(partition, ["h3", "--help"])
+        assert result.exit_code == 0
+        assert "--min-size" in result.output
+
+    def test_in_place_option_exists(self, cli_runner):
+        """Verify --in-place option is recognized."""
+        result = cli_runner.invoke(partition, ["h3", "--help"])
+        assert result.exit_code == 0
+        assert "--in-place" in result.output
+
+
+class TestSubPartitionCore:
+    """Test sub_partition core functionality."""
+
+    def test_find_large_files_filters_by_size(self, temp_partition_dir):
+        """Test that find_large_files correctly filters by size threshold."""
+        from geoparquet_io.core.sub_partition import find_large_files
+
+        # Create test files of different sizes
+        # Small file: 1KB
+        small_data = pa.table({"id": [1], "geometry": [b"POINT(0 0)"]})
+        small_path = os.path.join(temp_partition_dir, "small.parquet")
+        pq.write_table(small_data, small_path)
+
+        # Large file: create with more rows to exceed threshold
+        large_data = pa.table({"id": list(range(10000)), "geometry": [b"POINT(0 0)" * 100] * 10000})
+        large_path = os.path.join(temp_partition_dir, "large.parquet")
+        pq.write_table(large_data, large_path)
+
+        # Threshold that should only match the large file
+        large_size = os.path.getsize(large_path)
+        small_size = os.path.getsize(small_path)
+        threshold = (large_size + small_size) // 2  # Middle value
+
+        result = find_large_files(temp_partition_dir, min_size_bytes=threshold)
+
+        assert len(result) == 1
+        assert result[0] == large_path
+
+    def test_find_large_files_returns_empty_for_no_matches(self, temp_partition_dir):
+        """Test that find_large_files returns empty list when no files exceed threshold."""
+        from geoparquet_io.core.sub_partition import find_large_files
+
+        # Create small file
+        small_data = pa.table({"id": [1]})
+        small_path = os.path.join(temp_partition_dir, "small.parquet")
+        pq.write_table(small_data, small_path)
+
+        # Threshold larger than any file
+        result = find_large_files(temp_partition_dir, min_size_bytes=1000000000)
+
+        assert result == []
+
+    def test_find_large_files_recursive(self, temp_partition_dir):
+        """Test that find_large_files searches subdirectories."""
+        from geoparquet_io.core.sub_partition import find_large_files
+
+        # Create nested file
+        subdir = os.path.join(temp_partition_dir, "subdir")
+        os.makedirs(subdir)
+        data = pa.table({"id": list(range(1000))})
+        nested_path = os.path.join(subdir, "nested.parquet")
+        pq.write_table(data, nested_path)
+
+        result = find_large_files(temp_partition_dir, min_size_bytes=1)
+
+        assert len(result) == 1
+        assert result[0] == nested_path
+
+
+class TestSubPartitionExecution:
+    """Test sub_partition_directory function."""
+
+    def test_sub_partition_creates_subdirectories(self, temp_partition_dir):
+        """Test that sub_partition_directory creates sub-partitions for large files."""
+        from pathlib import Path
+
+        from geoparquet_io.core.sub_partition import sub_partition_directory
+
+        # Copy the buildings test file to our temp directory
+        buildings_file = Path(__file__).parent / "data" / "buildings_test.parquet"
+        large_path = os.path.join(temp_partition_dir, "large.parquet")
+        shutil.copy(buildings_file, large_path)
+
+        # Get file size and use threshold just below it
+        file_size = os.path.getsize(large_path)
+        threshold = file_size - 100
+
+        result = sub_partition_directory(
+            directory=temp_partition_dir,
+            partition_type="h3",
+            min_size_bytes=threshold,
+            resolution=4,
+            in_place=True,
+            verbose=False,
+        )
+
+        # Original file should be gone
+        assert not os.path.exists(large_path)
+
+        # Sub-partition directory should exist
+        subdir = os.path.join(temp_partition_dir, "large_h3")
+        assert os.path.isdir(subdir)
+
+        # Should have some partition files
+        partition_files = list(Path(subdir).glob("*.parquet"))
+        assert len(partition_files) > 0
+
+        assert result["processed"] == 1
+        assert result["skipped"] == 0
+
+    def test_sub_partition_skips_small_files(self, temp_partition_dir):
+        """Test that sub_partition_directory skips files below threshold."""
+        from geoparquet_io.core.sub_partition import sub_partition_directory
+
+        # Create small file
+        data = pa.table({"id": [1], "geometry": [b"POINT(0 0)"]})
+        small_path = os.path.join(temp_partition_dir, "small.parquet")
+        pq.write_table(data, small_path)
+
+        result = sub_partition_directory(
+            directory=temp_partition_dir,
+            partition_type="h3",
+            min_size_bytes=1000000000,  # 1GB - way bigger than file
+            resolution=4,
+            in_place=True,
+            verbose=False,
+        )
+
+        # File should still exist
+        assert os.path.exists(small_path)
+        assert result["processed"] == 0
+
+    def test_sub_partition_handles_errors(self, temp_partition_dir, monkeypatch):
+        """Test that sub_partition_directory captures errors and preserves files on failure."""
+        from pathlib import Path
+
+        from geoparquet_io.core.sub_partition import sub_partition_directory
+
+        # Copy the buildings test file to our temp directory
+        buildings_file = Path(__file__).parent / "data" / "buildings_test.parquet"
+        large_path = os.path.join(temp_partition_dir, "large.parquet")
+        shutil.copy(buildings_file, large_path)
+
+        # Get file size and use threshold just below it
+        file_size = os.path.getsize(large_path)
+        threshold = file_size - 100
+
+        # Mock the partition function to raise an error
+        def mock_partition_fail(*args, **kwargs):
+            raise ValueError("Simulated partition failure")
+
+        # Patch the h3 partition function to fail - patch where it's imported
+        monkeypatch.setattr(
+            "geoparquet_io.core.partition_by_h3.partition_by_h3", mock_partition_fail
+        )
+
+        result = sub_partition_directory(
+            directory=temp_partition_dir,
+            partition_type="h3",
+            min_size_bytes=threshold,
+            resolution=4,
+            in_place=True,
+            verbose=False,
+        )
+
+        # Original file should still exist (not deleted due to error)
+        assert os.path.exists(large_path)
+
+        # Should have captured the error
+        assert result["processed"] == 0
+        assert len(result["errors"]) == 1
+        assert result["errors"][0]["file"] == large_path
+        assert "Simulated partition failure" in result["errors"][0]["error"]
+
+
+class TestSubPartitionCLI:
+    """Test CLI integration for sub-partitioning."""
+
+    def test_partition_h3_with_directory_and_min_size(self, cli_runner, temp_partition_dir):
+        """Test gpio partition h3 with directory input and --min-size."""
+        from pathlib import Path
+
+        # Copy the buildings test file to our temp directory
+        buildings_file = Path(__file__).parent / "data" / "buildings_test.parquet"
+        test_file = os.path.join(temp_partition_dir, "test.parquet")
+        shutil.copy(buildings_file, test_file)
+
+        file_size = os.path.getsize(test_file)
+
+        # Run with --min-size just below file size (use B suffix for bytes)
+        # Use --force to bypass small partition warnings (test file only has 42 rows)
+        result = cli_runner.invoke(
+            partition,
+            [
+                "h3",
+                temp_partition_dir,
+                "--min-size",
+                f"{file_size - 100}B",
+                "--resolution",
+                "4",
+                "--in-place",
+                "--force",
+            ],
+        )
+
+        assert result.exit_code == 0, f"Failed: {result.output}"
+
+        # Original should be gone
+        assert not os.path.exists(test_file)
+
+        # Sub-partition dir should exist
+        subdir = os.path.join(temp_partition_dir, "test_h3")
+        assert os.path.isdir(subdir)
+
+    def test_partition_h3_directory_requires_min_size(self, cli_runner, temp_partition_dir):
+        """Test that directory input without --min-size gives error."""
+        result = cli_runner.invoke(
+            partition,
+            ["h3", temp_partition_dir, "--resolution", "4"],
+        )
+        assert result.exit_code != 0
+        assert "min-size" in result.output.lower() or "directory" in result.output.lower()
+
+    def test_partition_s2_with_directory_and_min_size(self, cli_runner, temp_partition_dir):
+        """Test gpio partition s2 with directory input and --min-size."""
+        from pathlib import Path
+
+        # Copy the buildings test file to our temp directory
+        buildings_file = Path(__file__).parent / "data" / "buildings_test.parquet"
+        test_file = os.path.join(temp_partition_dir, "test.parquet")
+        shutil.copy(buildings_file, test_file)
+
+        file_size = os.path.getsize(test_file)
+
+        result = cli_runner.invoke(
+            partition,
+            [
+                "s2",
+                temp_partition_dir,
+                "--min-size",
+                f"{file_size - 100}B",
+                "--level",
+                "8",
+                "--in-place",
+                "--force",
+            ],
+        )
+
+        assert result.exit_code == 0, f"Failed: {result.output}"
+        assert not os.path.exists(test_file)
+        assert os.path.isdir(os.path.join(temp_partition_dir, "test_s2"))
+
+    def test_partition_quadkey_with_directory_and_min_size(self, cli_runner, temp_partition_dir):
+        """Test gpio partition quadkey with directory input and --min-size."""
+        from pathlib import Path
+
+        # Copy the buildings test file to our temp directory
+        buildings_file = Path(__file__).parent / "data" / "buildings_test.parquet"
+        test_file = os.path.join(temp_partition_dir, "test.parquet")
+        shutil.copy(buildings_file, test_file)
+
+        file_size = os.path.getsize(test_file)
+
+        result = cli_runner.invoke(
+            partition,
+            [
+                "quadkey",
+                temp_partition_dir,
+                "--min-size",
+                f"{file_size - 100}B",
+                "--auto",
+                "--in-place",
+                "--force",
+            ],
+        )
+
+        assert result.exit_code == 0, f"Failed: {result.output}"
+        assert not os.path.exists(test_file)
+        assert os.path.isdir(os.path.join(temp_partition_dir, "test_quadkey"))

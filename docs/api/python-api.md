@@ -581,6 +581,96 @@ stats = table.partition_by_admin(
 )
 ```
 
+### Sub-Partitioning Utilities
+
+For working with directories of partitioned files, gpio provides utilities to find and sub-partition large files.
+
+#### `find_large_files(directory, min_size_bytes, recursive=True)`
+
+Find parquet files exceeding a size threshold.
+
+```python
+from geoparquet_io.core.sub_partition import find_large_files
+
+# Find files over 100MB
+large_files = find_large_files('/data/partitions/', min_size_bytes=100 * 1024 * 1024)
+print(f"Found {len(large_files)} large files")
+for file_path in large_files:
+    print(f"  {file_path}")
+```
+
+**Parameters:**
+- `directory` (str): Directory to search
+- `min_size_bytes` (int): Minimum file size in bytes
+- `recursive` (bool): Search subdirectories (default: True)
+
+**Returns:** List of file paths sorted by size (largest first)
+
+#### `sub_partition_directory(directory, partition_type, min_size_bytes, resolution=None, level=None, in_place=False, hive=False, overwrite=False, verbose=False, force=False, skip_analysis=True, compression='ZSTD', compression_level=15, auto=False, target_rows=100000, max_partitions=10000)`
+
+Sub-partition large files in a directory using spatial indexing.
+
+```python
+from geoparquet_io.core.sub_partition import sub_partition_directory
+
+# Sub-partition all H3-partitioned files over 100MB
+result = sub_partition_directory(
+    directory='/data/h3_partitions/',
+    partition_type='h3',
+    min_size_bytes=100 * 1024 * 1024,
+    resolution=4,
+    in_place=True,  # Replace originals
+    verbose=True
+)
+
+print(f"Processed: {result['processed']}")
+print(f"Errors: {len(result['errors'])}")
+
+# Sub-partition S2 files with auto-resolution
+result = sub_partition_directory(
+    directory='/data/s2_partitions/',
+    partition_type='s2',
+    min_size_bytes=50 * 1024 * 1024,
+    auto=True,
+    target_rows=50000,
+    skip_analysis=True  # Skip per-file analysis for speed
+)
+
+# Sub-partition quadkey files
+result = sub_partition_directory(
+    directory='/data/quadkey_partitions/',
+    partition_type='quadkey',
+    min_size_bytes=200 * 1024 * 1024,
+    resolution=8,
+    hive=True
+)
+```
+
+**Parameters:**
+- `directory` (str): Directory containing parquet files
+- `partition_type` (str): Type of partition ("h3", "s2", "quadkey")
+- `min_size_bytes` (int): Minimum file size to process
+- `resolution` (int | None): Resolution for H3/quadkey (0-15 for H3)
+- `level` (int | None): Level for S2 (alias for resolution)
+- `in_place` (bool): Delete originals after successful sub-partition (default: False)
+- `hive` (bool): Use Hive-style partitioning (default: False)
+- `overwrite` (bool): Overwrite existing output directories (default: False)
+- `verbose` (bool): Print verbose output (default: False)
+- `force` (bool): Force operation even with warnings (default: False)
+- `skip_analysis` (bool): Skip partition analysis for performance (default: True)
+- `compression` (str): Compression codec (default: "ZSTD")
+- `compression_level` (int): Compression level (default: 15)
+- `auto` (bool): Auto-calculate resolution (default: False)
+- `target_rows` (int): Target rows per partition for auto mode (default: 100000)
+- `max_partitions` (int): Max partitions for auto mode (default: 10000)
+
+**Returns:** Dictionary with keys:
+- `processed` (int): Number of files successfully processed
+- `skipped` (int): Number of files skipped (below threshold)
+- `errors` (list): List of dicts with keys `file` and `error`
+
+**Note:** When `auto=True`, the function automatically calculates the best resolution based on data distribution. Use `skip_analysis=True` for faster batch processing when you trust the resolution settings.
+
 #### `add_admin_divisions(dataset='overture', levels=None, country_filter=None, use_centroid=False)`
 
 Add administrative division columns via spatial join.
