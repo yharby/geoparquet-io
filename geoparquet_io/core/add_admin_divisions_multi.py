@@ -219,20 +219,28 @@ def _get_result_stats(con, output_parquet, dataset, levels, verbose):
     return total_features, features_with_admin, unique_counts
 
 
-def _setup_dataset_and_columns(input_parquet, dataset_name, dataset_source, levels, verbose):
+def _setup_dataset_and_columns(
+    input_parquet, dataset_name, dataset_source, levels, verbose, no_cache=False
+):
     """Setup dataset and get column information."""
+    from geoparquet_io.core.admin_datasets import get_or_cache_dataset
+
     dataset = AdminDatasetFactory.create(dataset_name, dataset_source, verbose)
 
     if verbose:
         debug(f"\nUsing admin dataset: {dataset.get_dataset_name()}")
-        debug(f"Data source: {dataset.get_source()}")
         debug(f"Adding admin levels: {', '.join(levels)}")
 
     dataset.validate_levels(levels)
     partition_columns = dataset.get_partition_columns(levels)
 
     input_url = safe_file_url(input_parquet, verbose)
-    admin_source = dataset.get_source()
+
+    # Use caching for remote admin datasets (unless no_cache is specified)
+    admin_source = get_or_cache_dataset(dataset, no_cache=no_cache, verbose=verbose)
+
+    if verbose:
+        debug(f"Data source: {admin_source}")
 
     input_geom_col = find_primary_geometry_column(input_parquet, verbose)
     admin_geom_col = dataset.get_geometry_column()
@@ -434,6 +442,7 @@ def add_admin_divisions_multi(
     geoparquet_version: str | None = None,
     overwrite: bool = False,
     prefix: str | None = None,
+    no_cache: bool = False,
 ):
     """
     Add admin division columns from a multi-level admin dataset.
@@ -453,6 +462,7 @@ def add_admin_divisions_multi(
         row_group_rows: Exact number of rows per row group
         profile: AWS profile name (S3 only, optional)
         prefix: Optional column name prefix (default: dataset name, use "admin" for admin: format)
+        no_cache: Skip local cache and use remote dataset directly
     """
     # Check if output file exists
     if output_parquet and not overwrite:
@@ -479,7 +489,9 @@ def add_admin_divisions_multi(
         input_bbox_info,
         input_bbox_col,
         admin_bbox_col,
-    ) = _setup_dataset_and_columns(input_parquet, dataset_name, dataset_source, levels, verbose)
+    ) = _setup_dataset_and_columns(
+        input_parquet, dataset_name, dataset_source, levels, verbose, no_cache=no_cache
+    )
 
     # Get metadata before processing (skip in dry-run)
     metadata = None
