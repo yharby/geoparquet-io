@@ -204,28 +204,28 @@ class TestOvertureAdminDataset:
         assert transform is None
 
     def test_get_output_column_name_country(self):
-        """Test Vecorel-compliant country column name."""
+        """Test default country column name (dataset prefix)."""
         dataset = OvertureAdminDataset()
         col_name = dataset.get_output_column_name("country")
 
-        # Should map to Vecorel column name
-        assert col_name == "admin:country_code"
+        # Default prefix should be "overture"
+        assert col_name == "overture_country"
 
     def test_get_output_column_name_region(self):
-        """Test Vecorel-compliant subdivision column name."""
+        """Test default region column name (dataset prefix)."""
         dataset = OvertureAdminDataset()
         col_name = dataset.get_output_column_name("region")
 
-        # Should map to Vecorel column name
-        assert col_name == "admin:subdivision_code"
+        # Default prefix should be "overture"
+        assert col_name == "overture_region"
 
     def test_get_output_column_name_fallback(self):
         """Test fallback to default pattern for unknown levels."""
         dataset = OvertureAdminDataset()
         col_name = dataset.get_output_column_name("unknown_level")
 
-        # Should fall back to default pattern
-        assert col_name == "admin:unknown_level"
+        # Should use dataset prefix
+        assert col_name == "overture_unknown_level"
 
 
 class TestBaseAdminDatasetDefaults:
@@ -241,22 +241,22 @@ class TestBaseAdminDatasetDefaults:
         assert transform is None
 
     def test_get_output_column_name_default(self):
-        """Test that base class uses default 'admin:{level}' pattern."""
+        """Test that base class uses dataset prefix by default."""
         # Use CurrentAdminDataset as a concrete implementation
         dataset = CurrentAdminDataset()
         col_name = dataset.get_output_column_name("country")
 
-        # Default implementation should use pattern
-        assert col_name == "admin:country"
+        # Default implementation should use dataset prefix
+        assert col_name == "current_country"
 
     def test_gaul_uses_default_column_names(self):
-        """Test that GAUL dataset uses default column naming (not Vecorel)."""
+        """Test that GAUL dataset uses dataset prefix by default."""
         dataset = GAULAdminDataset()
 
-        # GAUL should use default naming pattern
-        assert dataset.get_output_column_name("continent") == "admin:continent"
-        assert dataset.get_output_column_name("country") == "admin:country"
-        assert dataset.get_output_column_name("department") == "admin:department"
+        # GAUL should use dataset prefix
+        assert dataset.get_output_column_name("continent") == "gaul_continent"
+        assert dataset.get_output_column_name("country") == "gaul_country"
+        assert dataset.get_output_column_name("department") == "gaul_department"
 
     def test_gaul_no_column_transforms(self):
         """Test that GAUL dataset has no column transformations."""
@@ -366,3 +366,90 @@ class TestAdminDatasetIntegration:
         # Local path
         dataset = AdminDatasetFactory.create("gaul", source_path="/local/path/data.parquet")
         assert dataset.is_remote() is False
+
+
+class TestAdminDatasetPrefixFunctionality:
+    """Test prefix functionality for column naming."""
+
+    def test_get_default_prefix_gaul(self):
+        """Test that GAUL dataset returns 'gaul' as default prefix."""
+        dataset = GAULAdminDataset()
+        prefix = dataset.get_default_prefix()
+        assert prefix == "gaul"
+
+    def test_get_default_prefix_overture(self):
+        """Test that Overture dataset returns 'overture' as default prefix."""
+        dataset = OvertureAdminDataset()
+        prefix = dataset.get_default_prefix()
+        assert prefix == "overture"
+
+    def test_get_default_prefix_current(self):
+        """Test that Current dataset returns 'current' as default prefix."""
+        dataset = CurrentAdminDataset()
+        prefix = dataset.get_default_prefix()
+        assert prefix == "current"
+
+    def test_get_output_column_name_with_default_prefix_gaul(self):
+        """Test GAUL column naming with default prefix (None)."""
+        dataset = GAULAdminDataset()
+
+        # With no prefix specified, should use default prefix (gaul)
+        assert dataset.get_output_column_name("continent", prefix=None) == "gaul_continent"
+        assert dataset.get_output_column_name("country", prefix=None) == "gaul_country"
+        assert dataset.get_output_column_name("department", prefix=None) == "gaul_department"
+
+    def test_get_output_column_name_with_default_prefix_overture(self):
+        """Test Overture column naming with default prefix (None)."""
+        dataset = OvertureAdminDataset()
+
+        # With no prefix specified, should use default prefix (overture)
+        assert dataset.get_output_column_name("country", prefix=None) == "overture_country"
+        assert dataset.get_output_column_name("region", prefix=None) == "overture_region"
+
+    def test_get_output_column_name_with_admin_prefix(self):
+        """Test column naming with admin prefix (colon format)."""
+        dataset = GAULAdminDataset()
+
+        # With admin prefix, should use colon format
+        assert dataset.get_output_column_name("continent", prefix="admin") == "admin:continent"
+        assert dataset.get_output_column_name("country", prefix="admin") == "admin:country"
+        assert dataset.get_output_column_name("department", prefix="admin") == "admin:department"
+
+    def test_get_output_column_name_with_custom_prefix(self):
+        """Test column naming with custom prefix."""
+        dataset = GAULAdminDataset()
+
+        # With custom prefix, should use underscore format
+        assert (
+            dataset.get_output_column_name("continent", prefix="mycustom") == "mycustom_continent"
+        )
+        assert dataset.get_output_column_name("country", prefix="mycustom") == "mycustom_country"
+        assert (
+            dataset.get_output_column_name("department", prefix="mycustom") == "mycustom_department"
+        )
+
+    def test_prefix_prevents_duplicate_columns(self):
+        """Test that different prefixes create unique column names."""
+        gaul_dataset = GAULAdminDataset()
+        overture_dataset = OvertureAdminDataset()
+
+        # Same level, different datasets, default prefixes
+        gaul_country = gaul_dataset.get_output_column_name("country", prefix=None)
+        overture_country = overture_dataset.get_output_column_name("country", prefix=None)
+
+        # Should be different
+        assert gaul_country == "gaul_country"
+        assert overture_country == "overture_country"
+        assert gaul_country != overture_country
+
+    def test_multiple_custom_prefixes(self):
+        """Test using multiple custom prefixes on same dataset."""
+        dataset = GAULAdminDataset()
+
+        # Different prefixes should create different column names
+        prefix1_col = dataset.get_output_column_name("country", prefix="source1")
+        prefix2_col = dataset.get_output_column_name("country", prefix="source2")
+
+        assert prefix1_col == "source1_country"
+        assert prefix2_col == "source2_country"
+        assert prefix1_col != prefix2_col

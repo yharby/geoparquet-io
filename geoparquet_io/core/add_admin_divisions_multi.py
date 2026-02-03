@@ -52,11 +52,11 @@ def _build_admin_subquery(
     )"""
 
 
-def _build_admin_select_clause(dataset, levels, partition_columns):
+def _build_admin_select_clause(dataset, levels, partition_columns, prefix=None):
     """Build SELECT clause for admin columns with transformations."""
     admin_select_parts = []
     for i, (level, col) in enumerate(zip(levels, partition_columns, strict=True)):
-        output_col_name = dataset.get_output_column_name(level)
+        output_col_name = dataset.get_output_column_name(level, prefix=prefix)
         col_transform = dataset.get_column_transform(level)
 
         if col_transform:
@@ -314,6 +314,7 @@ def _build_query_components(
     input_bbox_col,
     verbose,
     dry_run,
+    prefix=None,
 ):
     """Build all query components."""
     admin_source = dataset.prepare_data_source(con)
@@ -336,7 +337,9 @@ def _build_query_components(
         dry_run,
     )
 
-    admin_select_clause = _build_admin_select_clause(dataset, levels, partition_columns)
+    admin_select_clause = _build_admin_select_clause(
+        dataset, levels, partition_columns, prefix=prefix
+    )
     admin_subquery = _build_admin_subquery(
         dataset,
         levels,
@@ -430,6 +433,7 @@ def add_admin_divisions_multi(
     profile: str | None = None,
     geoparquet_version: str | None = None,
     overwrite: bool = False,
+    prefix: str | None = None,
 ):
     """
     Add admin division columns from a multi-level admin dataset.
@@ -448,6 +452,7 @@ def add_admin_divisions_multi(
         row_group_size_mb: Target row group size in MB
         row_group_rows: Exact number of rows per row group
         profile: AWS profile name (S3 only, optional)
+        prefix: Optional column name prefix (default: dataset name, use "admin" for admin: format)
     """
     # Check if output file exists
     if output_parquet and not overwrite:
@@ -509,6 +514,7 @@ def add_admin_divisions_multi(
         input_bbox_col,
         verbose,
         dry_run,
+        prefix=prefix,
     )
 
     # Handle dry-run mode

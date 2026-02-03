@@ -188,22 +188,57 @@ class AdminDataset(ABC):
         """
         return None
 
-    def get_output_column_name(self, level_name: str) -> str:
+    def get_default_prefix(self) -> str:
+        """
+        Get the default prefix for this dataset's output columns.
+
+        Default implementation extracts the first word from the dataset name
+        and lowercases it. Subclasses can override for custom behavior.
+
+        Returns:
+            Default prefix string (e.g., "gaul", "overture", "current")
+
+        Examples:
+            "GAUL L2 Admin Boundaries" -> "gaul"
+            "Overture Maps Divisions" -> "overture"
+            "Current (source.coop countries)" -> "current"
+        """
+        # Extract first word from dataset name and lowercase
+        dataset_name = self.get_dataset_name()
+        first_word = dataset_name.split()[0]
+        return first_word.lower()
+
+    def get_output_column_name(self, level_name: str, prefix: str | None = None) -> str:
         """
         Get the output column name for a given administrative level.
 
-        This allows datasets to specify custom output column names that differ
-        from the simple "admin:{level}" pattern, enabling compliance with
-        specifications like Vecorel that use specific column names.
+        This allows datasets to specify custom output column names with
+        configurable prefixes to support multi-dataset workflows.
 
         Args:
             level_name: The level name (e.g., "country", "region")
+            prefix: Optional prefix for column names. If None, uses get_default_prefix().
+                   If "admin", uses colon format (admin:level).
+                   Otherwise uses underscore format (prefix_level).
 
         Returns:
-            Output column name (e.g., "admin:country_code", "admin:subdivision_code")
+            Output column name (e.g., "gaul_country", "admin:country", "custom_country")
+
+        Examples:
+            get_output_column_name("country", prefix=None) -> "gaul_country" (for GAUL)
+            get_output_column_name("country", prefix="admin") -> "admin:country"
+            get_output_column_name("country", prefix="mycustom") -> "mycustom_country"
         """
-        # Default behavior: use "admin:{level}" pattern
-        return f"admin:{level_name}"
+        if prefix is None:
+            # Use dataset's default prefix with underscore format
+            prefix = self.get_default_prefix()
+            return f"{prefix}_{level_name}"
+        elif prefix == "admin":
+            # Special case: use colon format for "admin" prefix
+            return f"admin:{level_name}"
+        else:
+            # Custom prefix with underscore format
+            return f"{prefix}_{level_name}"
 
     @abstractmethod
     def configure_s3(self, con: duckdb.DuckDBPyConnection) -> None:
@@ -405,24 +440,8 @@ class OvertureAdminDataset(AdminDataset):
             return "CASE WHEN region LIKE '%-%' THEN split_part(region, '-', 2) ELSE region END"
         return None
 
-    def get_output_column_name(self, level_name: str) -> str:
-        """
-        Get the output column name for Vecorel compliance.
-
-        Maps level names to Vecorel-compliant column names.
-
-        Args:
-            level_name: The level name (e.g., "country", "region")
-
-        Returns:
-            Vecorel-compliant column name
-        """
-        # Map to Vecorel column names
-        vecorel_mapping = {
-            "country": "admin:country_code",
-            "region": "admin:subdivision_code",
-        }
-        return vecorel_mapping.get(level_name, f"admin:{level_name}")
+    # Overture now uses the base class implementation
+    # No override needed - base class handles all prefix logic
 
     def configure_s3(self, con: duckdb.DuckDBPyConnection) -> None:
         """Configure S3 for AWS us-west-2 region where Overture data is stored."""

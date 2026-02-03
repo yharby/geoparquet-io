@@ -56,7 +56,8 @@ class TestDryRunCommands:
         assert "s3://nlebovits/gaul-l2-admin" in result.output
         # Should show spatial join query
         assert "ST_Intersects" in result.output
-        assert "admin:continent" in result.output or "admin:country" in result.output
+        # New default: dataset-prefixed columns
+        assert "gaul_continent" in result.output or "gaul_country" in result.output
         # Should show COPY statement
         assert "COPY (" in result.output
         assert "TO 'output.parquet'" in result.output
@@ -80,11 +81,11 @@ class TestDryRunCommands:
 
         assert result.exit_code == 0
         assert "DRY RUN MODE" in result.output
-        # Should only show requested levels
-        assert "admin:continent" in result.output
-        assert "admin:country" in result.output
+        # Should only show requested levels (with dataset prefix)
+        assert "gaul_continent" in result.output
+        assert "gaul_country" in result.output
         # Should not include department
-        assert "admin:department" not in result.output
+        assert "gaul_department" not in result.output
 
     def test_add_bbox_dry_run_verbose(self, buildings_test_file):
         """Test dry-run mode with verbose flag."""

@@ -2824,6 +2824,13 @@ def add(ctx):
 @click.option(
     "--add-bbox", is_flag=True, help="Automatically add bbox column and metadata if missing."
 )
+@click.option(
+    "--prefix",
+    type=str,
+    default=None,
+    help="Column name prefix. Defaults to dataset name (gaul, overture). "
+    "Use 'admin' for admin:level format.",
+)
 @output_format_options
 @geoparquet_version_option
 @overwrite_option
@@ -2837,6 +2844,7 @@ def add_country_codes(
     dataset,
     levels,
     add_bbox,
+    prefix,
     compression,
     compression_level,
     row_group_size,
@@ -2861,20 +2869,38 @@ def add_country_codes(
     - overture: Overture Maps (levels: country, region, locality)
 
     \b
+    **Column Naming (Breaking Change in v0.7):**
+    By default, columns are prefixed with the dataset name to prevent conflicts:
+    - GAUL: gaul_country, gaul_continent, gaul_department
+    - Overture: overture_country, overture_region
+
+    Use --prefix to customize:
+    - --prefix admin: admin:country format (old behavior)
+    - --prefix mycustom: mycustom_country format
+
+    \b
     **Examples:**
 
     \b
-    # Add all GAUL levels (continent, country, department)
+    # Add GAUL levels (creates gaul_continent, gaul_country, gaul_department)
     gpio add admin-divisions input.parquet output.parquet --dataset gaul
 
     \b
-    # Add specific GAUL levels only
-    gpio add admin-divisions input.parquet output.parquet --dataset gaul \\
-        --levels continent,country
+    # Add Overture levels (creates overture_country, overture_region)
+    gpio add admin-divisions input.parquet output.parquet --dataset overture
 
     \b
-    # Remote to remote
-    gpio add admin-divisions s3://in.parquet s3://out.parquet --aws-profile my-aws
+    # Add both datasets to same file (no conflicts!)
+    gpio add admin-divisions input.parquet temp.parquet --dataset gaul
+    gpio add admin-divisions temp.parquet output.parquet --dataset overture
+
+    \b
+    # Use admin: format (old behavior)
+    gpio add admin-divisions input.parquet output.parquet --dataset gaul --prefix admin
+
+    \b
+    # Custom prefix
+    gpio add admin-divisions input.parquet output.parquet --dataset gaul --prefix source1
 
     \b
     # Preview SQL before execution
@@ -2932,6 +2958,7 @@ def add_country_codes(
         row_group_rows=row_group_size,
         geoparquet_version=geoparquet_version,
         overwrite=overwrite,
+        prefix=prefix,
     )
 
 
