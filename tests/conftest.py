@@ -1,18 +1,52 @@
 """
 Pytest configuration and shared fixtures for geoparquet-io tests.
+
+DuckDB Thread Limiting for Parallel Test Execution
+--------------------------------------------------
+Problem: DuckDB uses all CPU cores by default. With pytest-xdist running
+multiple workers (e.g., -n 4), each worker creates multiple DuckDB connections,
+leading to thread explosion: 4 workers × N connections × 16 threads = CPU saturation.
+
+Solution: Monkeypatch duckdb.connect() BEFORE any modules import duckdb.
+conftest.py is loaded before test collection, so we patch immediately at import.
+With 4 workers and 2 threads per connection, max threads = 4 × 2 = 8.
 """
 
-import json
-import os
-import shutil
-import tempfile
-import time
-from contextlib import contextmanager
-from pathlib import Path
-
+# ---------------------------------------------------------------------------
+# CRITICAL: Patch duckdb.connect BEFORE any other imports
+# This must happen before geoparquet_io modules are imported during collection
+# ---------------------------------------------------------------------------
 import duckdb
-import pyarrow.parquet as pq
-import pytest
+
+_DUCKDB_TEST_THREADS = 2  # Threads per DuckDB connection during tests
+_original_duckdb_connect = duckdb.connect
+
+
+def _thread_limited_connect(*args, **kwargs):
+    """Wrapper around duckdb.connect that limits threads for test performance."""
+    config = kwargs.pop("config", {}) or {}
+    if "threads" not in config:
+        config["threads"] = _DUCKDB_TEST_THREADS
+    return _original_duckdb_connect(*args, config=config, **kwargs)
+
+
+# Apply the monkeypatch globally at import time - BEFORE other imports
+duckdb.connect = _thread_limited_connect
+
+# ---------------------------------------------------------------------------
+# Now import everything else (they'll get the patched duckdb.connect)
+# noqa: E402 - Intentionally importing after duckdb patch
+# ---------------------------------------------------------------------------
+import json  # noqa: E402
+import os  # noqa: E402
+import shutil  # noqa: E402
+import tempfile  # noqa: E402
+import time  # noqa: E402
+from contextlib import contextmanager  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+import pyarrow.parquet as pq  # noqa: E402
+import pytest  # noqa: E402
 
 # Test data directory
 TEST_DATA_DIR = Path(__file__).parent / "data"
