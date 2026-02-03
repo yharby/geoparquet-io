@@ -392,25 +392,16 @@ def calculate_auto_resolution(
         max_resolution = default_max
 
     # Calculate optimal resolution
+    kwargs = {
+        "total_rows": total_rows,
+        "target_rows_per_partition": target_rows_per_partition,
+        "max_partitions": max_partitions,
+        "min_resolution": min_resolution,
+        "max_resolution": max_resolution,
+        "verbose": verbose,
+    }
     # For A5/S2, pass index_name parameter
-    if spatial_index_type in ("a5", "s2"):
-        resolution = calc_func(
-            total_rows=total_rows,
-            target_rows_per_partition=target_rows_per_partition,
-            max_partitions=max_partitions,
-            min_resolution=min_resolution,
-            max_resolution=max_resolution,
-            verbose=verbose,
-            index_name=index_name,
-        )
-    else:
-        resolution = calc_func(
-            total_rows=total_rows,
-            target_rows_per_partition=target_rows_per_partition,
-            max_partitions=max_partitions,
-            min_resolution=min_resolution,
-            max_resolution=max_resolution,
-            verbose=verbose,
-        )
+    if index_name is not None:
+        kwargs["index_name"] = index_name
 
-    return resolution
+    return calc_func(**kwargs)

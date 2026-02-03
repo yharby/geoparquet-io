@@ -2,8 +2,11 @@
 
 """Tests for auto-resolution calculation for spatial partitioning."""
 
+import logging
+
 import pytest
 
+from geoparquet_io.core.logging_config import get_logger
 from geoparquet_io.core.partition_auto_resolution import (
     _calculate_a5_resolution,
     _calculate_h3_resolution,
@@ -516,3 +519,62 @@ class TestAutoResolutionMath:
 
         # Average rows per partition should be reasonably close to target
         assert target_rows / 2 <= actual_avg_rows <= target_rows * 10
+
+
+class TestVerboseOutput:
+    """Test verbose output logging with correct index names."""
+
+    @pytest.fixture(autouse=True)
+    def setup_logging(self):
+        """Set up logging for caplog to work."""
+        logger = get_logger()
+        original_propagate = logger.propagate
+        logger.setLevel(logging.DEBUG)
+        logger.handlers.clear()
+        logger.propagate = True  # Enable propagation for caplog to work
+        yield
+        # Clean up
+        logger.handlers.clear()
+        logger.propagate = original_propagate
+
+    def test_s2_verbose_output_uses_s2_name(self, caplog):
+        """Verbose output should show 'S2' for S2 index type."""
+        with caplog.at_level(logging.INFO, logger="geoparquet_io"):
+            _calculate_a5_resolution(
+                total_rows=100000,
+                target_rows_per_partition=1000,
+                verbose=True,
+                index_name="S2",
+            )
+        assert "S2 auto-resolution" in caplog.text
+
+    def test_a5_verbose_output_uses_a5_name(self, caplog):
+        """Verbose output should show 'A5' for A5 index type."""
+        with caplog.at_level(logging.INFO, logger="geoparquet_io"):
+            _calculate_a5_resolution(
+                total_rows=100000,
+                target_rows_per_partition=1000,
+                verbose=True,
+                index_name="A5",
+            )
+        assert "A5 auto-resolution" in caplog.text
+
+    def test_h3_verbose_output_uses_h3_name(self, caplog):
+        """Verbose output should show 'H3' for H3 index type."""
+        with caplog.at_level(logging.INFO, logger="geoparquet_io"):
+            _calculate_h3_resolution(
+                total_rows=100000,
+                target_rows_per_partition=1000,
+                verbose=True,
+            )
+        assert "H3 auto-resolution" in caplog.text
+
+    def test_quadkey_verbose_output_uses_quadkey_name(self, caplog):
+        """Verbose output should show 'Quadkey' for Quadkey index type."""
+        with caplog.at_level(logging.INFO, logger="geoparquet_io"):
+            _calculate_quadkey_resolution(
+                total_rows=100000,
+                target_rows_per_partition=1000,
+                verbose=True,
+            )
+        assert "Quadkey auto-resolution" in caplog.text
