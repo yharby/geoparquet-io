@@ -211,3 +211,60 @@ class TestSubPartitionCLI:
         )
         assert result.exit_code != 0
         assert "min-size" in result.output.lower() or "directory" in result.output.lower()
+
+    def test_partition_s2_with_directory_and_min_size(self, cli_runner, temp_partition_dir):
+        """Test gpio partition s2 with directory input and --min-size."""
+        from pathlib import Path
+
+        # Copy the buildings test file to our temp directory
+        buildings_file = Path(__file__).parent / "data" / "buildings_test.parquet"
+        test_file = os.path.join(temp_partition_dir, "test.parquet")
+        shutil.copy(buildings_file, test_file)
+
+        file_size = os.path.getsize(test_file)
+
+        result = cli_runner.invoke(
+            partition,
+            [
+                "s2",
+                temp_partition_dir,
+                "--min-size",
+                f"{file_size - 100}B",
+                "--level",
+                "8",
+                "--in-place",
+                "--force",
+            ],
+        )
+
+        assert result.exit_code == 0, f"Failed: {result.output}"
+        assert not os.path.exists(test_file)
+        assert os.path.isdir(os.path.join(temp_partition_dir, "test_s2"))
+
+    def test_partition_quadkey_with_directory_and_min_size(self, cli_runner, temp_partition_dir):
+        """Test gpio partition quadkey with directory input and --min-size."""
+        from pathlib import Path
+
+        # Copy the buildings test file to our temp directory
+        buildings_file = Path(__file__).parent / "data" / "buildings_test.parquet"
+        test_file = os.path.join(temp_partition_dir, "test.parquet")
+        shutil.copy(buildings_file, test_file)
+
+        file_size = os.path.getsize(test_file)
+
+        result = cli_runner.invoke(
+            partition,
+            [
+                "quadkey",
+                temp_partition_dir,
+                "--min-size",
+                f"{file_size - 100}B",
+                "--auto",
+                "--in-place",
+                "--force",
+            ],
+        )
+
+        assert result.exit_code == 0, f"Failed: {result.output}"
+        assert not os.path.exists(test_file)
+        assert os.path.isdir(os.path.join(temp_partition_dir, "test_quadkey"))
