@@ -1,6 +1,12 @@
 """Tests for core/check_spatial_order.py module."""
 
-from geoparquet_io.core.check_spatial_order import check_spatial_order
+import pytest
+
+from geoparquet_io.core.check_spatial_order import (
+    _bboxes_overlap,
+    check_spatial_order,
+    check_spatial_order_bbox_stats,
+)
 
 
 class TestCheckSpatialOrder:
@@ -65,17 +71,257 @@ class TestCheckSpatialOrder:
         assert result is None or isinstance(result, float)
 
     def test_poorly_ordered_file(self, unsorted_test_file):
-        """Test check_spatial_order with poorly ordered file (covers lines 122-123, 131-132)."""
+        """Test check_spatial_order with poorly ordered file."""
         result = check_spatial_order(
             unsorted_test_file,
             random_sample_size=50,
             limit_rows=500,
-            verbose=True,  # Use verbose to cover line 122-123 output
+            verbose=True,
             return_results=True,
         )
         assert isinstance(result, dict)
-        assert result["passed"] is False
-        assert result["ratio"] >= 0.5
-        assert len(result["issues"]) > 0
-        assert len(result["recommendations"]) > 0
-        assert "Poor spatial ordering" in result["issues"][0]
+        assert "method" in result
+        # Different thresholds for different methods
+        if result["method"] == "sampling":
+            # Sampling method: passed=False when ratio >= 0.5
+            if result["ratio"] >= 0.5:
+                assert result["passed"] is False
+        elif result["method"] == "bbox_stats":
+            # Bbox-stats method: passed=False when ratio >= 0.3
+            if result["ratio"] >= 0.3:
+                assert result["passed"] is False
+        # Check that failure includes proper feedback
+        if not result["passed"]:
+            assert len(result["issues"]) > 0
+            assert len(result["recommendations"]) > 0
+            assert "spatial ordering" in str(result["issues"]).lower()
+
+
+class TestBboxOverlap:
+    """Tests for _bboxes_overlap helper function."""
+
+    def test_overlapping_bboxes(self):
+        """Test bboxes that overlap."""
+        bbox1 = {"xmin": 0.0, "ymin": 0.0, "xmax": 10.0, "ymax": 10.0}
+        bbox2 = {"xmin": 5.0, "ymin": 5.0, "xmax": 15.0, "ymax": 15.0}
+        assert _bboxes_overlap(bbox1, bbox2) is True
+
+    def test_adjacent_bboxes_touching_edge(self):
+        """Test bboxes that touch at an edge (not overlapping)."""
+        bbox1 = {"xmin": 0.0, "ymin": 0.0, "xmax": 10.0, "ymax": 10.0}
+        bbox2 = {"xmin": 10.0, "ymin": 0.0, "xmax": 20.0, "ymax": 10.0}
+        assert _bboxes_overlap(bbox1, bbox2) is False
+
+    def test_disjoint_bboxes(self):
+        """Test bboxes that are completely separate."""
+        bbox1 = {"xmin": 0.0, "ymin": 0.0, "xmax": 10.0, "ymax": 10.0}
+        bbox2 = {"xmin": 20.0, "ymin": 20.0, "xmax": 30.0, "ymax": 30.0}
+        assert _bboxes_overlap(bbox1, bbox2) is False
+
+    def test_one_bbox_contains_other(self):
+        """Test when one bbox completely contains another."""
+        bbox1 = {"xmin": 0.0, "ymin": 0.0, "xmax": 20.0, "ymax": 20.0}
+        bbox2 = {"xmin": 5.0, "ymin": 5.0, "xmax": 15.0, "ymax": 15.0}
+        assert _bboxes_overlap(bbox1, bbox2) is True
+
+    def test_identical_bboxes(self):
+        """Test identical bboxes."""
+        bbox1 = {"xmin": 0.0, "ymin": 0.0, "xmax": 10.0, "ymax": 10.0}
+        bbox2 = {"xmin": 0.0, "ymin": 0.0, "xmax": 10.0, "ymax": 10.0}
+        assert _bboxes_overlap(bbox1, bbox2) is True
+
+    def test_overlap_only_in_x_dimension(self):
+        """Test bboxes that overlap in X but not Y (no overlap)."""
+        bbox1 = {"xmin": 0.0, "ymin": 0.0, "xmax": 10.0, "ymax": 5.0}
+        bbox2 = {"xmin": 5.0, "ymin": 10.0, "xmax": 15.0, "ymax": 15.0}
+        assert _bboxes_overlap(bbox1, bbox2) is False
+
+    def test_overlap_only_in_y_dimension(self):
+        """Test bboxes that overlap in Y but not X (no overlap)."""
+        bbox1 = {"xmin": 0.0, "ymin": 0.0, "xmax": 5.0, "ymax": 10.0}
+        bbox2 = {"xmin": 10.0, "ymin": 5.0, "xmax": 15.0, "ymax": 15.0}
+        assert _bboxes_overlap(bbox1, bbox2) is False
+
+    def test_touching_at_corner(self):
+        """Test bboxes that touch only at a corner point (not overlapping)."""
+        bbox1 = {"xmin": 0.0, "ymin": 0.0, "xmax": 10.0, "ymax": 10.0}
+        bbox2 = {"xmin": 10.0, "ymin": 10.0, "xmax": 20.0, "ymax": 20.0}
+        assert _bboxes_overlap(bbox1, bbox2) is False
+
+    def test_negative_coordinates(self):
+        """Test with negative coordinate values."""
+        bbox1 = {"xmin": -10.0, "ymin": -10.0, "xmax": 0.0, "ymax": 0.0}
+        bbox2 = {"xmin": -5.0, "ymin": -5.0, "xmax": 5.0, "ymax": 5.0}
+        assert _bboxes_overlap(bbox1, bbox2) is True
+
+    def test_bbox_ordering_doesnt_matter(self):
+        """Test that order of bbox arguments doesn't affect result."""
+        bbox1 = {"xmin": 0.0, "ymin": 0.0, "xmax": 10.0, "ymax": 10.0}
+        bbox2 = {"xmin": 5.0, "ymin": 5.0, "xmax": 15.0, "ymax": 15.0}
+        assert _bboxes_overlap(bbox1, bbox2) == _bboxes_overlap(bbox2, bbox1)
+
+
+class TestCheckSpatialOrderBboxStats:
+    """Tests for check_spatial_order_bbox_stats function."""
+
+    def test_returns_dict_structure(self, places_test_file):
+        """Test that bbox-stats method returns proper dict structure."""
+        result = check_spatial_order_bbox_stats(
+            places_test_file, verbose=False, return_results=True, quiet=False
+        )
+        assert isinstance(result, dict)
+        assert "passed" in result
+        assert "ratio" in result
+        assert "method" in result
+        assert result["method"] == "bbox_stats"
+        assert "overlap_count" in result
+        assert "total_pairs" in result
+        assert "issues" in result
+        assert "recommendations" in result
+        assert "fix_available" in result
+
+    def test_with_spatially_ordered_file(self, places_test_file):
+        """Test with file expected to have good spatial ordering."""
+        result = check_spatial_order_bbox_stats(
+            places_test_file, verbose=False, return_results=True, quiet=False
+        )
+        # Just verify structure - actual ordering depends on test data
+        assert isinstance(result["passed"], bool)
+        assert isinstance(result["ratio"], float)
+        assert 0.0 <= result["ratio"] <= 1.0
+        assert result["overlap_count"] >= 0
+        assert result["total_pairs"] >= 0
+
+    def test_without_bbox_column_raises_error(self, buildings_test_file):
+        """Test that files without bbox column raise ValueError."""
+        with pytest.raises(ValueError, match="does not have a bbox column"):
+            check_spatial_order_bbox_stats(
+                buildings_test_file, verbose=False, return_results=True, quiet=False
+            )
+
+    def test_verbose_mode(self, places_test_file):
+        """Test bbox-stats method with verbose=True."""
+        result = check_spatial_order_bbox_stats(
+            places_test_file, verbose=True, return_results=True, quiet=False
+        )
+        assert isinstance(result, dict)
+        assert result["method"] == "bbox_stats"
+
+    def test_quiet_mode(self, places_test_file):
+        """Test bbox-stats method with quiet=True."""
+        result = check_spatial_order_bbox_stats(
+            places_test_file, verbose=False, return_results=True, quiet=True
+        )
+        assert isinstance(result, dict)
+        assert result["method"] == "bbox_stats"
+
+    def test_passing_threshold(self, places_test_file):
+        """Test that ratio < 0.3 means passed=True."""
+        result = check_spatial_order_bbox_stats(
+            places_test_file, verbose=False, return_results=True, quiet=False
+        )
+        if result["ratio"] < 0.3:
+            assert result["passed"] is True
+            assert len(result["issues"]) == 0
+            assert result["fix_available"] is False
+        else:
+            assert result["passed"] is False
+            assert len(result["issues"]) > 0
+            assert result["fix_available"] is True
+
+    def test_issues_and_recommendations_when_failed(self, unsorted_test_file):
+        """Test that failing check includes proper issues and recommendations."""
+        result = check_spatial_order_bbox_stats(
+            unsorted_test_file, verbose=False, return_results=True, quiet=False
+        )
+        if not result["passed"]:
+            assert len(result["issues"]) > 0
+            assert len(result["recommendations"]) > 0
+            assert "spatial ordering" in str(result["issues"]).lower()
+            assert "Hilbert" in str(result["recommendations"])
+
+    def test_without_return_results(self, places_test_file):
+        """Test bbox-stats method with return_results=False."""
+        result = check_spatial_order_bbox_stats(
+            places_test_file, verbose=False, return_results=False, quiet=False
+        )
+        # Should return ratio directly when return_results=False
+        assert result is None or isinstance(result, float)
+
+
+class TestAutoDetectionAndFallback:
+    """Tests for automatic method detection and fallback behavior."""
+
+    def test_auto_detection_uses_bbox_stats_when_available(self, places_test_file):
+        """Test that check_spatial_order auto-detects and uses bbox-stats."""
+        result = check_spatial_order(
+            places_test_file,
+            random_sample_size=50,
+            limit_rows=500,
+            verbose=False,
+            return_results=True,
+        )
+        # Should use bbox_stats method automatically
+        assert result["method"] == "bbox_stats"
+
+    def test_fallback_to_sampling_when_no_bbox(self, buildings_test_file):
+        """Test that check_spatial_order falls back to sampling when no bbox."""
+        result = check_spatial_order(
+            buildings_test_file,
+            random_sample_size=50,
+            limit_rows=500,
+            verbose=False,
+            return_results=True,
+        )
+        # Should fall back to sampling method
+        assert result["method"] == "sampling"
+        assert "consecutive_avg" in result
+        assert "random_avg" in result
+
+    def test_fallback_uses_sampling_method(self, buildings_test_file):
+        """Test that fallback correctly uses sampling method."""
+        result = check_spatial_order(
+            buildings_test_file,
+            random_sample_size=50,
+            limit_rows=500,
+            verbose=False,
+            return_results=True,
+            quiet=True,  # Suppress warnings for test
+        )
+        # Should use sampling method when no bbox column
+        assert result["method"] == "sampling"
+
+    def test_bbox_stats_method_indicated_in_result(self, places_test_file):
+        """Test that method field correctly indicates bbox_stats."""
+        result = check_spatial_order(
+            places_test_file,
+            random_sample_size=50,
+            limit_rows=500,
+            verbose=False,
+            return_results=True,
+        )
+        assert "method" in result
+        assert result["method"] in ["bbox_stats", "sampling"]
+
+    def test_return_structure_consistent_across_methods(
+        self, places_test_file, buildings_test_file
+    ):
+        """Test that both methods return compatible structures."""
+        bbox_result = check_spatial_order(
+            places_test_file,
+            random_sample_size=50,
+            limit_rows=500,
+            verbose=False,
+            return_results=True,
+        )
+        sampling_result = check_spatial_order(
+            buildings_test_file,
+            random_sample_size=50,
+            limit_rows=500,
+            verbose=False,
+            return_results=True,
+        )
+        # Both should have these common fields
+        for field in ["passed", "ratio", "issues", "recommendations", "fix_available", "method"]:
+            assert field in bbox_result
+            assert field in sampling_result

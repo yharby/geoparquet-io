@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Fast bbox-stats spatial ordering check** - GeoParquet 2.0+ files (with bbox column) now use a much faster method (~10-100x) for checking spatial ordering by analyzing row group statistics instead of sampling geometry data. Falls back automatically to sampling method for GeoParquet 1.x files. ([#109](https://github.com/geoparquet/geoparquet-io/issues/109))
+
 ### Removed (Breaking Changes)
 
 - **Deprecated CLI commands removed** - The following deprecated commands have been removed. Use the replacements shown below:
