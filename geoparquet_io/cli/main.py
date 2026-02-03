@@ -13,11 +13,13 @@ from geoparquet_io.cli.decorators import (
     compression_options,
     dry_run_option,
     geoparquet_version_option,
+    handle_directory_sub_partition,
     output_format_options,
     overwrite_option,
     parse_row_group_options,
     partition_input_options,
     partition_options,
+    partition_options_base,
     row_group_options,
     show_sql_option,
     verbose_option,
@@ -3574,7 +3576,7 @@ def partition(ctx):
     "GAUL levels: continent,country,department. "
     "Overture levels: country,region.",
 )
-@partition_options
+@partition_options_base
 @output_format_options
 @verbose_option
 @geoparquet_version_option
@@ -3591,8 +3593,6 @@ def partition_admin(
     force,
     skip_analysis,
     prefix,
-    min_size,
-    in_place,
     compression,
     compression_level,
     row_group_size,
@@ -3676,7 +3676,7 @@ def partition_admin(
 @click.argument("output_folder", required=False)
 @click.option("--column", required=True, help="Column name to partition by (required)")
 @click.option("--chars", type=int, help="Number of characters to use as prefix for partitioning")
-@partition_options
+@partition_options_base
 @output_format_options
 @verbose_option
 @geoparquet_version_option
@@ -3693,8 +3693,6 @@ def partition_string(
     force,
     skip_analysis,
     prefix,
-    min_size,
-    in_place,
     compression,
     compression_level,
     row_group_size,
@@ -3866,43 +3864,24 @@ def partition_h3(
         # Sub-partition all files over 100MB in a directory
         gpio partition h3 /data/partitions/ --min-size 100MB --resolution 4 --in-place
     """
-    import os
-
     # Handle directory input with --min-size
-    if os.path.isdir(input_parquet):
-        if not min_size:
-            raise click.UsageError(
-                "Directory input requires --min-size to specify which files to process"
-            )
-
-        from geoparquet_io.core.common import parse_size_string
-        from geoparquet_io.core.logging_config import warn
-        from geoparquet_io.core.sub_partition import sub_partition_directory
-
-        min_size_bytes = parse_size_string(min_size)
-
-        result = sub_partition_directory(
-            directory=input_parquet,
-            partition_type="h3",
-            min_size_bytes=min_size_bytes,
-            resolution=resolution,
-            in_place=in_place,
-            hive=hive,
-            overwrite=overwrite,
-            verbose=verbose,
-            force=force,
-            skip_analysis=skip_analysis,
-            compression=compression.upper() if compression else "ZSTD",
-            compression_level=compression_level or 15,
-            auto=auto,
-            target_rows=target_rows,
-            max_partitions=max_partitions,
-        )
-
-        if result["errors"]:
-            for err in result["errors"]:
-                warn(f"Error processing {err['file']}: {err['error']}")
-
+    if handle_directory_sub_partition(
+        input_parquet=input_parquet,
+        partition_type="h3",
+        min_size=min_size,
+        resolution=resolution,
+        in_place=in_place,
+        hive=hive,
+        overwrite=overwrite,
+        verbose=verbose,
+        force=force,
+        skip_analysis=skip_analysis,
+        compression=compression,
+        compression_level=compression_level,
+        auto=auto,
+        target_rows=target_rows,
+        max_partitions=max_partitions,
+    ):
         return
 
     # Existing single-file logic continues below...
@@ -4054,43 +4033,24 @@ def partition_s2(
         # Sub-partition all files over 100MB in a directory
         gpio partition s2 /data/partitions/ --min-size 100MB --level 10 --in-place
     """
-    import os
-
     # Handle directory input with --min-size
-    if os.path.isdir(input_parquet):
-        if not min_size:
-            raise click.UsageError(
-                "Directory input requires --min-size to specify which files to process"
-            )
-
-        from geoparquet_io.core.common import parse_size_string
-        from geoparquet_io.core.logging_config import warn
-        from geoparquet_io.core.sub_partition import sub_partition_directory
-
-        min_size_bytes = parse_size_string(min_size)
-
-        result = sub_partition_directory(
-            directory=input_parquet,
-            partition_type="s2",
-            min_size_bytes=min_size_bytes,
-            level=level,  # S2 uses "level" not "resolution"
-            in_place=in_place,
-            hive=hive,
-            overwrite=overwrite,
-            verbose=verbose,
-            force=force,
-            skip_analysis=skip_analysis,
-            compression=compression.upper() if compression else "ZSTD",
-            compression_level=compression_level or 15,
-            auto=auto,
-            target_rows=target_rows,
-            max_partitions=max_partitions,
-        )
-
-        if result["errors"]:
-            for err in result["errors"]:
-                warn(f"Error processing {err['file']}: {err['error']}")
-
+    if handle_directory_sub_partition(
+        input_parquet=input_parquet,
+        partition_type="s2",
+        min_size=min_size,
+        level=level,  # S2 uses "level" not "resolution"
+        in_place=in_place,
+        hive=hive,
+        overwrite=overwrite,
+        verbose=verbose,
+        force=force,
+        skip_analysis=skip_analysis,
+        compression=compression,
+        compression_level=compression_level,
+        auto=auto,
+        target_rows=target_rows,
+        max_partitions=max_partitions,
+    ):
         return
 
     # If preview mode, output_folder is not required
@@ -4166,7 +4126,7 @@ def partition_s2(
     is_flag=True,
     help="Keep the A5 column in output files (default: excluded for non-Hive, included for Hive)",
 )
-@partition_options
+@partition_options_base
 @output_format_options
 @verbose_option
 @geoparquet_version_option
@@ -4187,8 +4147,6 @@ def partition_a5(
     force,
     skip_analysis,
     prefix,
-    min_size,
-    in_place,
     compression,
     compression_level,
     row_group_size,
@@ -4306,7 +4264,7 @@ def partition_a5(
     is_flag=True,
     help="Keep the KD-tree column in output files (default: excluded for non-Hive, included for Hive)",
 )
-@partition_options
+@partition_options_base
 @output_format_options
 @verbose_option
 @geoparquet_version_option
@@ -4327,8 +4285,6 @@ def partition_kdtree(
     force,
     skip_analysis,
     prefix,
-    min_size,
-    in_place,
     compression,
     compression_level,
     row_group_size,
@@ -4559,43 +4515,24 @@ def partition_quadkey(
         # Sub-partition all files over 100MB in a directory
         gpio partition quadkey /data/partitions/ --min-size 100MB --auto --in-place
     """
-    import os
-
     # Handle directory input with --min-size
-    if os.path.isdir(input_parquet):
-        if not min_size:
-            raise click.UsageError(
-                "Directory input requires --min-size to specify which files to process"
-            )
-
-        from geoparquet_io.core.common import parse_size_string
-        from geoparquet_io.core.logging_config import warn
-        from geoparquet_io.core.sub_partition import sub_partition_directory
-
-        min_size_bytes = parse_size_string(min_size)
-
-        result = sub_partition_directory(
-            directory=input_parquet,
-            partition_type="quadkey",
-            min_size_bytes=min_size_bytes,
-            resolution=resolution,  # quadkey uses "resolution"
-            in_place=in_place,
-            hive=hive,
-            overwrite=overwrite,
-            verbose=verbose,
-            force=force,
-            skip_analysis=skip_analysis,
-            compression=compression.upper() if compression else "ZSTD",
-            compression_level=compression_level or 15,
-            auto=auto,
-            target_rows=target_rows,
-            max_partitions=max_partitions,
-        )
-
-        if result["errors"]:
-            for err in result["errors"]:
-                warn(f"Error processing {err['file']}: {err['error']}")
-
+    if handle_directory_sub_partition(
+        input_parquet=input_parquet,
+        partition_type="quadkey",
+        min_size=min_size,
+        resolution=resolution,
+        in_place=in_place,
+        hive=hive,
+        overwrite=overwrite,
+        verbose=verbose,
+        force=force,
+        skip_analysis=skip_analysis,
+        compression=compression,
+        compression_level=compression_level,
+        auto=auto,
+        target_rows=target_rows,
+        max_partitions=max_partitions,
+    ):
         return
 
     # If preview mode, output_folder is not required

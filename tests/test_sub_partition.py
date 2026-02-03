@@ -163,6 +163,48 @@ class TestSubPartitionExecution:
         assert os.path.exists(small_path)
         assert result["processed"] == 0
 
+    def test_sub_partition_handles_errors(self, temp_partition_dir, monkeypatch):
+        """Test that sub_partition_directory captures errors and preserves files on failure."""
+        from pathlib import Path
+
+        from geoparquet_io.core.sub_partition import sub_partition_directory
+
+        # Copy the buildings test file to our temp directory
+        buildings_file = Path(__file__).parent / "data" / "buildings_test.parquet"
+        large_path = os.path.join(temp_partition_dir, "large.parquet")
+        shutil.copy(buildings_file, large_path)
+
+        # Get file size and use threshold just below it
+        file_size = os.path.getsize(large_path)
+        threshold = file_size - 100
+
+        # Mock the partition function to raise an error
+        def mock_partition_fail(*args, **kwargs):
+            raise ValueError("Simulated partition failure")
+
+        # Patch the h3 partition function to fail - patch where it's imported
+        monkeypatch.setattr(
+            "geoparquet_io.core.partition_by_h3.partition_by_h3", mock_partition_fail
+        )
+
+        result = sub_partition_directory(
+            directory=temp_partition_dir,
+            partition_type="h3",
+            min_size_bytes=threshold,
+            resolution=4,
+            in_place=True,
+            verbose=False,
+        )
+
+        # Original file should still exist (not deleted due to error)
+        assert os.path.exists(large_path)
+
+        # Should have captured the error
+        assert result["processed"] == 0
+        assert len(result["errors"]) == 1
+        assert result["errors"][0]["file"] == large_path
+        assert "Simulated partition failure" in result["errors"][0]["error"]
+
 
 class TestSubPartitionCLI:
     """Test CLI integration for sub-partitioning."""

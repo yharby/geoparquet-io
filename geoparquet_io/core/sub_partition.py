@@ -165,6 +165,12 @@ def sub_partition_directory(
             func(**kwargs)
 
             if in_place:
+                # Validate output before deleting original
+                output_files = list(Path(output_dir).glob("**/*.parquet"))
+                if not output_files:
+                    raise RuntimeError(
+                        f"Sub-partition created no output files, keeping original: {file_path}"
+                    )
                 os.remove(file_path)
                 debug(f"Removed original: {file_path}")
 
