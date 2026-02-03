@@ -726,7 +726,7 @@ def validate_parquet_extension(output_file: str, any_extension: bool = False) ->
         )
 
 
-def get_duckdb_connection(load_spatial=True, load_httpfs=None, use_s3_auth=False):
+def get_duckdb_connection(load_spatial=True, load_httpfs=None, use_s3_auth=False, threads=None):
     """
     Create a DuckDB connection with necessary extensions loaded.
 
@@ -742,11 +742,17 @@ def get_duckdb_connection(load_spatial=True, load_httpfs=None, use_s3_auth=False
                     If None (default), auto-detects based on usage.
         use_s3_auth: Whether to configure AWS credential chain for S3 (default: False).
                     Only needed for private buckets.
+        threads: Number of threads for DuckDB to use (default: None = all cores).
+                Limiting threads is useful for parallel test execution to prevent
+                CPU saturation when multiple pytest workers create connections.
 
     Returns:
         duckdb.DuckDBPyConnection: Configured connection with extensions loaded
     """
-    con = duckdb.connect()
+    config = {}
+    if threads is not None:
+        config["threads"] = threads
+    con = duckdb.connect(config=config) if config else duckdb.connect()
 
     # Enable large buffer size for Arrow export to handle datasets with >2GB of
     # string/binary data (e.g., large WKB geometry columns). Without this,
