@@ -16,6 +16,26 @@ pip install geoparquet-io
 
 pipx and uv tool install the CLI in isolation while keeping it globally available. Use pip/uv add when you need the Python API in your project.
 
+## Installing Plugins
+
+gpio supports plugins that add specialized format support. Install plugins alongside the main tool:
+
+```bash
+# Install with PMTiles support
+uv tool install geoparquet-io --with gpio-pmtiles
+pipx install geoparquet-io --preinstall gpio-pmtiles
+
+# Add plugin to existing installation
+uv tool install --with gpio-pmtiles geoparquet-io
+pipx inject geoparquet-io gpio-pmtiles
+```
+
+Available plugins:
+
+- **[gpio-pmtiles](https://github.com/geoparquet-io/gpio-pmtiles)** - Convert between GeoParquet and PMTiles
+
+See the [Plugins Guide](../guide/plugins.md) for more information.
+
 ## From Source
 
 For the latest development version:

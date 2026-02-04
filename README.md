@@ -86,6 +86,24 @@ gpio.read('data.parquet') \
 
 The Python API keeps data in memory as Arrow tables, providing up to 5x better performance than CLI operations. See the [Python API documentation](https://geoparquet.io/api/python-api/) for full details.
 
+## Plugins
+
+gpio supports plugins that add specialized format support. Plugins are installed alongside the main tool:
+
+```bash
+# Install gpio with PMTiles support
+uv tool install geoparquet-io --with gpio-pmtiles
+pipx install geoparquet-io --preinstall gpio-pmtiles
+
+# Or add to existing installation
+uv tool install --with gpio-pmtiles geoparquet-io
+pipx inject geoparquet-io gpio-pmtiles
+```
+
+### Available Plugins
+
+- **[gpio-pmtiles](https://github.com/geoparquet-io/gpio-pmtiles)** - Convert between GeoParquet and PMTiles format for efficient web map tiles
+
 ## Claude Code Integration
 
 Use gpio with [Claude Code](https://claude.ai/code) for AI-assisted spatial data workflows.
