@@ -2833,6 +2833,18 @@ def add(ctx):
     help="Column name prefix. Defaults to dataset name (gaul, overture). "
     "Use 'admin' for admin:level format.",
 )
+@click.option(
+    "--no-cache",
+    is_flag=True,
+    help="Skip local cache and use remote dataset directly. "
+    "Useful when you need the latest data or are troubleshooting.",
+)
+@click.option(
+    "--clear-cache",
+    is_flag=True,
+    help="Delete all cached admin datasets before running. "
+    "Shows size of deleted files and prompts for confirmation.",
+)
 @output_format_options
 @geoparquet_version_option
 @overwrite_option
@@ -2847,6 +2859,8 @@ def add_country_codes(
     levels,
     add_bbox,
     prefix,
+    no_cache,
+    clear_cache,
     compression,
     compression_level,
     row_group_size,
@@ -2909,10 +2923,62 @@ def add_country_codes(
     gpio add admin-divisions input.parquet output.parquet --dataset gaul --dry-run
 
     \b
+    # Clear cached datasets to get fresh data
+    gpio add admin-divisions input.parquet output.parquet --dataset gaul --clear-cache
+
+    \b
+    # Skip cache entirely (use remote directly)
+    gpio add admin-divisions input.parquet output.parquet --dataset gaul --no-cache
+
+    \b
+    **Caching:**
+    Admin datasets (GAUL, Overture) are cached locally on first use to speed up
+    subsequent runs. Cache location: ~/.geoparquet-io/cache/admin/
+
+    - First run: Downloads and caches the full dataset (~5-50MB depending on dataset)
+    - Subsequent runs: Uses cached version (instant startup)
+    - Warning shown if cache is older than 6 months
+    - Use --no-cache to skip cache or --clear-cache to delete cached data
+
+    \b
     **Note:** Requires internet connection to fetch remote boundaries datasets.
     Input data must have valid geometries in WGS84 or compatible CRS.
     """
+    from geoparquet_io.core.admin_datasets import (
+        AdminDatasetFactory,
+        get_cache_dir,
+    )
+    from geoparquet_io.core.admin_datasets import (
+        clear_cache as clear_admin_cache,
+    )
+    from geoparquet_io.core.logging_config import info, success
     from geoparquet_io.core.streaming import is_stdin, should_stream_output
+
+    # Handle --clear-cache flag first
+    if clear_cache:
+        cache_dir = get_cache_dir()
+        if cache_dir.exists():
+            # Get list of files to show size
+            parquet_files = list(cache_dir.glob("*.parquet"))
+            if parquet_files:
+                total_size = sum(f.stat().st_size for f in parquet_files)
+                size_mb = total_size / (1024 * 1024)
+                click.echo(f"Cache directory: {cache_dir}")
+                click.echo(f"Files to delete: {len(parquet_files)}")
+                click.echo(f"Total size: {size_mb:.2f} MB")
+
+                if click.confirm("Delete all cached admin datasets?"):
+                    result = clear_admin_cache(confirm=True)
+                    success(
+                        f"Cleared cache: {result['files_deleted']} files, "
+                        f"{result['bytes_freed'] / (1024 * 1024):.2f} MB freed"
+                    )
+                else:
+                    info("Cache clear cancelled.")
+            else:
+                click.echo("No cached datasets found.")
+        else:
+            click.echo("No cache directory found.")
 
     # Check for streaming mode - not supported yet for admin-divisions
     if is_stdin(input_parquet) or should_stream_output(output_parquet):
@@ -2940,8 +3006,6 @@ def add_country_codes(
         level_list = [level.strip() for level in levels.split(",")]
     else:
         # Use all available levels for the dataset
-        from geoparquet_io.core.admin_datasets import AdminDatasetFactory
-
         temp_dataset = AdminDatasetFactory.create(dataset, None, verbose=False)
         level_list = temp_dataset.get_available_levels()
 
@@ -2961,6 +3025,7 @@ def add_country_codes(
         geoparquet_version=geoparquet_version,
         overwrite=overwrite,
         prefix=prefix,
+        no_cache=no_cache,
     )
 
 

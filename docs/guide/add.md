@@ -330,6 +330,53 @@ Add multiple hierarchical administrative levels:
 
 --8<-- "_includes/admin-datasets.md"
 
+### Caching
+
+Admin datasets (GAUL, Overture) are automatically cached locally on first use:
+
+- **First run**: Downloads and caches the full dataset (~5-50MB depending on dataset)
+- **Subsequent runs**: Uses cached version (instant startup)
+- **Cache location**: `~/.geoparquet-io/cache/admin/`
+- **Warning**: Shown if cache is older than 6 months
+
+**Cache management options:**
+
+=== "CLI"
+
+    ```bash
+    # Skip cache and use remote directly
+    gpio add admin-divisions input.parquet output.parquet --dataset gaul --no-cache
+
+    # Clear all cached datasets (prompts for confirmation)
+    gpio add admin-divisions input.parquet output.parquet --dataset gaul --clear-cache
+    ```
+
+=== "Python"
+
+    ```python
+    import geoparquet_io as gpio
+    from geoparquet_io.core.admin_datasets import get_cache_dir, clear_cache
+
+    # Default: uses cached datasets automatically
+    gpio.read('input.parquet').add_admin_divisions(
+        dataset='overture',
+        levels=['country', 'admin1']
+    ).write('output.parquet')
+
+    # Check cache location (~/.geoparquet-io/cache/admin/)
+    cache_dir = get_cache_dir()
+    print(f"Cache location: {cache_dir}")
+
+    # Clear all cached admin datasets
+    result = clear_cache(confirm=True)
+    print(f"Cleared {result['files_deleted']} files, {result['bytes_freed'] / 1024 / 1024:.2f} MB freed")
+    ```
+
+!!! tip "When to clear cache"
+    Clear your cache when you need fresh admin boundary data, such as after a
+    new Overture Maps release. The cache files are named with version numbers
+    (e.g., `gaul-2024-12-19.parquet`, `overture-2025-10-22.0.parquet`).
+
 ## Common Options
 
 All `add` commands support:

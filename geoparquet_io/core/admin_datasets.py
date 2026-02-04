@@ -9,12 +9,188 @@ or remote URLs, with automatic caching and error handling.
 """
 
 import os
+import time
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 import click
 import duckdb
 
-from geoparquet_io.core.logging_config import debug
+from geoparquet_io.core.common import get_duckdb_connection
+from geoparquet_io.core.logging_config import debug, info, warn
+
+# =============================================================================
+# Cache Configuration
+# =============================================================================
+
+# Cache age threshold in seconds (6 months)
+CACHE_AGE_THRESHOLD_SECONDS = 6 * 30 * 24 * 60 * 60  # ~180 days
+
+
+def get_cache_dir() -> Path:
+    """
+    Get the cache directory for admin datasets.
+
+    Returns:
+        Path to cache directory: ~/.geoparquet-io/cache/admin/
+    """
+    return Path.home() / ".geoparquet-io" / "cache" / "admin"
+
+
+def get_cached_path(dataset: "AdminDataset") -> Path:
+    """
+    Get the expected cache file path for a dataset.
+
+    Args:
+        dataset: AdminDataset instance
+
+    Returns:
+        Path where the cached file should be stored
+    """
+    cache_dir = get_cache_dir()
+    dataset_name = dataset.get_default_prefix()  # "gaul", "overture", "current"
+    version = dataset.get_version()
+    filename = f"{dataset_name}-{version}.parquet"
+    return cache_dir / filename
+
+
+def check_cache_age(cache_file: Path) -> str | None:
+    """
+    Check if a cache file is older than the threshold (6 months).
+
+    Args:
+        cache_file: Path to the cache file
+
+    Returns:
+        Warning message if cache is old, None otherwise
+    """
+    if not cache_file.exists():
+        return None
+
+    file_mtime = cache_file.stat().st_mtime
+    age_seconds = time.time() - file_mtime
+
+    if age_seconds >= CACHE_AGE_THRESHOLD_SECONDS:
+        age_days = int(age_seconds / (24 * 60 * 60))
+        age_months = age_days // 30
+        return (
+            f"Cached admin dataset is {age_months} months old. "
+            f"Consider clearing cache with --clear-cache to get updated data."
+        )
+
+    return None
+
+
+def clear_cache(confirm: bool = False) -> dict | None:
+    """
+    Clear all cached admin datasets.
+
+    Args:
+        confirm: If True, actually delete files. If False, return without action.
+
+    Returns:
+        Dictionary with deletion stats: {"files_deleted": int, "bytes_freed": int}
+        Returns None or {"cancelled": True} if confirm is False.
+    """
+    if not confirm:
+        return {"cancelled": True}
+
+    cache_dir = get_cache_dir()
+
+    if not cache_dir.exists():
+        return {"files_deleted": 0, "bytes_freed": 0}
+
+    files_deleted = 0
+    bytes_freed = 0
+
+    # Only delete .parquet files
+    for cache_file in cache_dir.glob("*.parquet"):
+        try:
+            bytes_freed += cache_file.stat().st_size
+            cache_file.unlink()
+            files_deleted += 1
+        except OSError:
+            pass  # Ignore deletion errors
+
+    return {"files_deleted": files_deleted, "bytes_freed": bytes_freed}
+
+
+def get_or_cache_dataset(
+    dataset: "AdminDataset",
+    no_cache: bool = False,
+    verbose: bool = False,
+) -> str:
+    """
+    Get the data source for a dataset, using cache if available.
+
+    For remote datasets:
+    1. If no_cache=True, return remote URL directly
+    2. If cached file exists and is valid, return cached path
+    3. Otherwise, download and cache the dataset, return cached path
+
+    For local/custom datasets:
+    - Return the path as-is (no caching)
+
+    Args:
+        dataset: AdminDataset instance
+        no_cache: If True, skip cache and use remote directly
+        verbose: Enable verbose logging
+
+    Returns:
+        Path or URL to use for the dataset
+    """
+    # Custom/local sources are not cached
+    if dataset.source_path is not None:
+        if verbose:
+            debug(f"Using custom source (not cached): {dataset.source_path}")
+        return dataset.source_path
+
+    # Local files are not cached
+    if not dataset.is_remote():
+        return dataset.get_source()
+
+    # If no_cache is requested, return remote URL directly
+    if no_cache:
+        if verbose:
+            debug("Cache disabled, using remote source directly")
+        return dataset.get_default_source()
+
+    # Check for cached version
+    cached_path = get_cached_path(dataset)
+
+    # Check if cache exists and is valid (non-empty)
+    if cached_path.exists() and cached_path.stat().st_size > 0:
+        # Check and warn about old cache
+        age_warning = check_cache_age(cached_path)
+        if age_warning:
+            warn(age_warning)
+
+        if verbose:
+            debug(f"Using cached dataset: {cached_path}")
+
+        return str(cached_path)
+
+    # Cache miss - need to download
+    try:
+        # Ensure cache directory exists
+        cache_dir = get_cache_dir()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        info(f"Downloading {dataset.get_dataset_name()} to local cache...")
+        info("This is a one-time download. Future runs will use the cached version.")
+
+        # Download to cache
+        result_path = dataset._download_to_cache(cached_path)
+
+        info(f"Cached dataset at: {result_path}")
+        return str(result_path)
+
+    except PermissionError:
+        warn("Cannot create cache directory. Using remote source directly.")
+        return dataset.get_default_source()
+    except Exception as e:
+        warn(f"Failed to cache dataset: {e}. Using remote source directly.")
+        return dataset.get_default_source()
 
 
 class AdminDataset(ABC):
@@ -24,6 +200,10 @@ class AdminDataset(ABC):
     Provides a common interface for different admin boundary datasets with
     hierarchical level support (e.g., continent → country → subdivisions).
     """
+
+    # Version identifier for this dataset release.
+    # Subclasses MUST define this attribute with their release version.
+    VERSION: str = "unknown"
 
     def __init__(self, source_path: str | None = None, verbose: bool = False):
         """
@@ -35,6 +215,50 @@ class AdminDataset(ABC):
         """
         self.source_path = source_path
         self.verbose = verbose
+
+    def get_version(self) -> str:
+        """
+        Get the version identifier for this dataset.
+
+        Returns:
+            Version string (e.g., "2024-12-19" or "2025-10-22.0")
+        """
+        return self.VERSION
+
+    def _download_to_cache(self, cache_path: Path) -> Path:
+        """
+        Download the dataset to the cache location.
+
+        This method downloads the full remote dataset and stores it locally.
+        The default implementation uses DuckDB to read and write the parquet file.
+
+        Args:
+            cache_path: Path where the cached file should be written
+
+        Returns:
+            Path to the cached file
+
+        Raises:
+            Exception: If download fails
+        """
+        source = self.get_default_source()
+
+        con = get_duckdb_connection(load_spatial=True, load_httpfs=True)
+        self.configure_s3(con)
+
+        # Get read options
+        read_options = self.get_read_parquet_options()
+        if read_options:
+            options_str = ", ".join([f"{k}={v}" for k, v in read_options.items()])
+            query = f"SELECT * FROM read_parquet('{source}', {options_str})"
+        else:
+            query = f"SELECT * FROM read_parquet('{source}')"
+
+        # Write to cache
+        con.execute(f"COPY ({query}) TO '{cache_path}' (FORMAT PARQUET)")
+        con.close()
+
+        return cache_path
 
     @abstractmethod
     def get_dataset_name(self) -> str:
@@ -289,6 +513,9 @@ class CurrentAdminDataset(AdminDataset):
     This is a wrapper around the existing country-level partition functionality.
     """
 
+    # Version from source.coop countries dataset
+    VERSION = "2024-01-01"
+
     def get_dataset_name(self) -> str:
         return "Current (source.coop countries)"
 
@@ -322,7 +549,12 @@ class GAULAdminDataset(AdminDataset):
     - continent: Continental grouping
     - country: Country level (GAUL0)
     - department: Second-level admin units (GAUL2)
+
+    Version corresponds to the data release date from source.coop.
     """
+
+    # GAUL dataset version (from source.coop release)
+    VERSION = "2024-12-19"
 
     def get_dataset_name(self) -> str:
         return "GAUL L2 Admin Boundaries"
@@ -380,6 +612,9 @@ class OvertureAdminDataset(AdminDataset):
     See: https://docs.overturemaps.org/guides/divisions/
     See: https://vecorel.org/administrative-division-extension/v0.1.0/schema.yaml
     """
+
+    # Overture Maps release version (extracted from S3 path)
+    VERSION = "2025-10-22.0"
 
     def get_dataset_name(self) -> str:
         return "Overture Maps Divisions"

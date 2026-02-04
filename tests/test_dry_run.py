@@ -46,7 +46,8 @@ class TestDryRunCommands:
         """Test dry-run mode for add admin-divisions command."""
         runner = CliRunner()
         result = runner.invoke(
-            add, ["admin-divisions", buildings_test_file, "output.parquet", "--dry-run"]
+            add,
+            ["admin-divisions", buildings_test_file, "output.parquet", "--dry-run", "--no-cache"],
         )
 
         assert result.exit_code == 0
@@ -76,6 +77,7 @@ class TestDryRunCommands:
                 "--levels",
                 "continent,country",
                 "--dry-run",
+                "--no-cache",
             ],
         )
 
@@ -116,7 +118,8 @@ class TestDryRunCommands:
 
         # Test admin-divisions dry-run
         result = runner.invoke(
-            add, ["admin-divisions", buildings_test_file, temp_output_file, "--dry-run"]
+            add,
+            ["admin-divisions", buildings_test_file, temp_output_file, "--dry-run", "--no-cache"],
         )
         assert result.exit_code == 0
         assert not os.path.exists(temp_output_file)
@@ -125,7 +128,7 @@ class TestDryRunCommands:
         """Test dry-run when input has bbox column (for admin-divisions)."""
         runner = CliRunner()
         result = runner.invoke(
-            add, ["admin-divisions", places_test_file, "output.parquet", "--dry-run"]
+            add, ["admin-divisions", places_test_file, "output.parquet", "--dry-run", "--no-cache"]
         )
 
         assert result.exit_code == 0
