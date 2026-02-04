@@ -1,6 +1,7 @@
 """Tests for core/duckdb_metadata.py module."""
 
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -21,7 +22,6 @@ from geoparquet_io.core.duckdb_metadata import (
     parse_geometry_logical_type,
     resolve_crs_reference,
 )
-from tests.conftest import safe_unlink
 
 
 class TestGetKvMetadata:
@@ -338,8 +338,8 @@ class TestGeoParquetErrorExceptions:
             # Verify the original exception is chained
             assert exc_info.value.__cause__ is not None
         finally:
-            # Clean up - use safe_unlink for Windows compatibility
-            safe_unlink(temp_path)
+            # Clean up
+            Path(temp_path).unlink(missing_ok=True)
 
     def test_raises_geoparquet_error_for_io_error(self):
         """Test that get_geo_metadata raises GeoParquetError for I/O errors."""
@@ -361,8 +361,8 @@ class TestGeoParquetErrorExceptions:
             # Verify the original exception is chained
             assert exc_info.value.__cause__ is not None
         finally:
-            # Clean up - use safe_unlink for Windows compatibility
-            safe_unlink(temp_path)
+            # Clean up
+            Path(temp_path).unlink(missing_ok=True)
 
     def test_geoparquet_error_is_library_exception(self):
         """Test that GeoParquetError is a standard Exception, not a Click exception."""
@@ -394,8 +394,8 @@ class TestGeoParquetErrorExceptions:
             # Verify the original exception is chained
             assert exc_info.value.__cause__ is not None
         finally:
-            # Clean up - use safe_unlink for Windows compatibility
-            safe_unlink(temp_path)
+            # Clean up
+            Path(temp_path).unlink(missing_ok=True)
 
     def test_get_kv_metadata_raises_error_for_io_error(self):
         """Test that get_kv_metadata raises GeoParquetError for I/O errors."""
@@ -421,5 +421,5 @@ class TestGeoParquetErrorExceptions:
             # Verify the original exception is chained
             assert exc_info.value.__cause__ is not None
         finally:
-            # Clean up - use safe_unlink for Windows compatibility
-            safe_unlink(temp_path)
+            # Clean up
+            Path(temp_path).unlink(missing_ok=True)

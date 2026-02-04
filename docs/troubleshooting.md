@@ -89,41 +89,13 @@ gpio inspect gs://bucket/file.parquet
 
 **Symptom**: "The process cannot access the file because it is being used by another process"
 
-**Cause**: DuckDB keeps file handles open, preventing cleanup. Unlike Unix, Windows doesn't allow deleting files that have open handles.
+**Cause**: DuckDB keeps file handles open, preventing cleanup.
 
-**Solutions for Users**:
+**Solutions**:
 
 1. Close any other applications accessing the file
 2. Use unique output filenames (avoid overwriting)
 3. Run operations sequentially, not in parallel
-
-**Solutions for Developers/Contributors**:
-
-When writing tests that create temporary files and use DuckDB to read them:
-
-1. **Use `safe_unlink` from conftest.py** instead of `Path.unlink()`:
-   ```python
-   from tests.conftest import safe_unlink
-
-   # In your test cleanup:
-   safe_unlink(temp_path)  # Retries with delays for Windows
-   ```
-
-2. **Use fixtures like `temp_output_dir`** which handle cleanup automatically:
-   ```python
-   def test_example(temp_output_dir):
-       output_file = os.path.join(temp_output_dir, "output.parquet")
-       # ... test code ...
-       # Cleanup handled automatically by fixture
-   ```
-
-3. **Use `safe_rmtree` for directories**:
-   ```python
-   from tests.conftest import safe_rmtree
-   safe_rmtree(temp_dir)  # Retries with delays for Windows
-   ```
-
-The `safe_unlink` and `safe_rmtree` functions retry file deletion up to 5 times with 0.1s delays between attempts, which gives Windows time to release file handles.
 
 ### Path Issues with Spaces
 
