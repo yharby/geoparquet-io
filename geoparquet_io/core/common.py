@@ -124,7 +124,59 @@ def should_skip_bbox(geoparquet_version):
     return geoparquet_version in ("2.0", "parquet-geo-only")
 
 
-def detect_geoparquet_file_type(parquet_file, verbose=False):
+def _get_file_cache_key(parquet_file: str) -> tuple[str, float]:
+    """Get cache key based on file path and modification time.
+
+    Returns (resolved_path, mtime) tuple for cache invalidation.
+    For remote files, returns (path, 0) since we can't check mtime.
+    """
+    from pathlib import Path
+
+    # Resolve the path
+    if is_remote_url(parquet_file):
+        return (parquet_file, 0)
+
+    # For local files, use real path and mtime
+    path = Path(parquet_file)
+    if path.exists():
+        return (str(path.resolve()), path.stat().st_mtime)
+    return (str(path), 0)
+
+
+# LRU cache for detect_geoparquet_file_type results
+# Using a simple dict cache with manual mtime tracking for invalidation
+_file_type_cache: dict[str, tuple[float, dict]] = {}
+_FILE_TYPE_CACHE_MAX_SIZE = 100
+
+
+def _check_file_type_cache(parquet_file: str) -> dict | None:
+    """Check cache for file type detection result."""
+    cache_key, mtime = _get_file_cache_key(parquet_file)
+    if cache_key in _file_type_cache:
+        cached_mtime, result = _file_type_cache[cache_key]
+        # For remote files (mtime=0), always use cache
+        # For local files, invalidate if file changed
+        if mtime == 0 or cached_mtime == mtime:
+            return result
+    return None
+
+
+def _update_file_type_cache(parquet_file: str, result: dict) -> None:
+    """Update cache with file type detection result."""
+    global _file_type_cache
+    cache_key, mtime = _get_file_cache_key(parquet_file)
+
+    # Simple LRU: if cache is full, clear half of it
+    if len(_file_type_cache) >= _FILE_TYPE_CACHE_MAX_SIZE:
+        # Remove oldest half
+        keys_to_remove = list(_file_type_cache.keys())[: _FILE_TYPE_CACHE_MAX_SIZE // 2]
+        for k in keys_to_remove:
+            del _file_type_cache[k]
+
+    _file_type_cache[cache_key] = (mtime, result)
+
+
+def detect_geoparquet_file_type(parquet_file, verbose=False, con=None):
     """
     Detect the GeoParquet/Parquet-geo type of a file.
 
@@ -134,9 +186,15 @@ def detect_geoparquet_file_type(parquet_file, verbose=False):
     - Parquet-geo-only (has native Parquet geo types but NO geo metadata)
     - Unknown (no geo indicators found)
 
+    Performance notes (Issue #232):
+    - For local files, uses PyArrow for ~300x faster metadata reads
+    - Results are cached with mtime-based invalidation
+    - Pass `con` to reuse an existing DuckDB connection for remote files
+
     Args:
         parquet_file: Path to the parquet file
         verbose: Whether to print verbose output
+        con: Optional DuckDB connection to reuse (for remote file operations)
 
     Returns:
         dict with:
@@ -151,6 +209,14 @@ def detect_geoparquet_file_type(parquet_file, verbose=False):
         get_geo_metadata,
     )
 
+    # Check cache first (skip if connection provided - caller wants fresh read)
+    if con is None:
+        cached_result = _check_file_type_cache(parquet_file)
+        if cached_result is not None:
+            if verbose:
+                debug(f"File type detection (cached): {cached_result}")
+            return cached_result.copy()  # Return copy to prevent mutation
+
     result = {
         "has_geo_metadata": False,
         "geo_version": None,
@@ -161,15 +227,15 @@ def detect_geoparquet_file_type(parquet_file, verbose=False):
 
     safe_url = safe_file_url(parquet_file, verbose=False)
 
-    # Check for geo metadata using DuckDB
-    geo_meta = get_geo_metadata(safe_url)
+    # Check for geo metadata (uses PyArrow for local files, DuckDB for remote)
+    geo_meta = get_geo_metadata(safe_url, con=con)
     if geo_meta:
         result["has_geo_metadata"] = True
         if isinstance(geo_meta, dict) and "version" in geo_meta:
             result["geo_version"] = geo_meta["version"]
 
-    # Check for native Parquet geo types using DuckDB schema
-    geo_columns = detect_geometry_columns(safe_url)
+    # Check for native Parquet geo types using schema
+    geo_columns = detect_geometry_columns(safe_url, con=con)
     if geo_columns:
         result["has_native_geo_types"] = True
 
@@ -187,10 +253,24 @@ def detect_geoparquet_file_type(parquet_file, verbose=False):
         result["bbox_recommended"] = False  # Native geo types provide row group stats
     # else: remains "unknown"
 
+    # Cache the result (only if no connection provided)
+    if con is None:
+        _update_file_type_cache(parquet_file, result)
+
     if verbose:
         debug(f"File type detection: {result}")
 
     return result
+
+
+def detect_geoparquet_file_type_cache_clear():
+    """Clear the file type detection cache."""
+    global _file_type_cache
+    _file_type_cache = {}
+
+
+# Add cache_clear method to the function for compatibility
+detect_geoparquet_file_type.cache_clear = detect_geoparquet_file_type_cache_clear
 
 
 def is_remote_url(path):

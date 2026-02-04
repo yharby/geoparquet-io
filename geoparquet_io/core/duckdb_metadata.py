@@ -4,6 +4,11 @@ DuckDB-based Parquet metadata extraction.
 This module provides functions to read Parquet metadata using DuckDB's
 built-in parquet functions instead of fsspec/PyArrow. This simplifies
 remote file access (S3, HTTP, etc.) by leveraging DuckDB's httpfs extension.
+
+Performance Optimization (Issue #232):
+For LOCAL files, we use PyArrow for metadata reads which is ~300x faster
+than DuckDB (0.1ms vs 44ms). DuckDB is still used for remote files (S3, HTTP)
+where PyArrow would require fsspec configuration.
 """
 
 import json
@@ -11,14 +16,274 @@ import re
 from typing import Any
 
 import duckdb
+import pyarrow.parquet as pq
 
 
 class GeoParquetError(Exception):
     """Raised when there are issues reading or processing GeoParquet files."""
 
 
-def _get_connection_for_file(parquet_file: str, existing_con=None):
-    """Get or create DuckDB connection appropriate for file location."""
+# =============================================================================
+# PyArrow Fast Path for Local Files (Issue #232 Performance Fix)
+# =============================================================================
+
+
+def _is_local_file(path: str) -> bool:
+    """Check if path is a local file (not remote URL)."""
+    from geoparquet_io.core.common import is_remote_url
+
+    return not is_remote_url(path)
+
+
+def _resolve_local_path(parquet_file: str) -> str:
+    """Resolve local path, handling partitions and globs.
+
+    For partitioned datasets, returns the first parquet file.
+    """
+    from geoparquet_io.core.common import get_first_parquet_file, is_partition_path
+
+    if is_partition_path(parquet_file):
+        first_file = get_first_parquet_file(parquet_file)
+        if first_file:
+            return first_file
+    return parquet_file
+
+
+def _pyarrow_get_kv_metadata(parquet_file: str) -> dict[bytes, bytes]:
+    """Get key-value metadata using PyArrow (fast path for local files)."""
+    try:
+        pf = pq.ParquetFile(parquet_file)
+        metadata = pf.metadata.metadata
+        return dict(metadata) if metadata else {}
+    except Exception as e:
+        error_msg = str(e)
+        if "not a parquet file" in error_msg.lower() or "magic" in error_msg.lower():
+            raise GeoParquetError(
+                f"Not a valid Parquet file: {parquet_file}\n"
+                f"This command requires .parquet files with valid Parquet format.\n"
+                f"Hint: Use 'gpio convert geoparquet' to convert other formats."
+            ) from e
+        raise GeoParquetError(f"Cannot read file: {parquet_file}\n{error_msg}") from e
+
+
+def _pyarrow_get_geo_metadata(parquet_file: str) -> dict | None:
+    """Get and parse 'geo' metadata using PyArrow (fast path for local files)."""
+    try:
+        pf = pq.ParquetFile(parquet_file)
+        metadata = pf.metadata.metadata
+        if metadata and b"geo" in metadata:
+            return json.loads(metadata[b"geo"].decode("utf-8"))
+        return None
+    except json.JSONDecodeError:
+        return None
+    except Exception as e:
+        error_msg = str(e)
+        if "not a parquet file" in error_msg.lower() or "magic" in error_msg.lower():
+            raise GeoParquetError(
+                f"Not a valid GeoParquet file: {parquet_file}\n"
+                f"This command requires .parquet files with valid Parquet format.\n"
+                f"Hint: Use 'gpio convert' to convert other formats to GeoParquet."
+            ) from e
+        raise GeoParquetError(f"Cannot read file: {parquet_file}\n{error_msg}") from e
+
+
+def _pyarrow_get_file_metadata(parquet_file: str) -> dict:
+    """Get file-level metadata using PyArrow (fast path for local files)."""
+    try:
+        metadata = pq.read_metadata(parquet_file)
+        return {
+            "num_rows": metadata.num_rows,
+            "num_row_groups": metadata.num_row_groups,
+            "created_by": metadata.created_by,
+            "format_version": metadata.format_version,
+        }
+    except Exception as e:
+        raise GeoParquetError(f"Cannot read file: {parquet_file}\n{str(e)}") from e
+
+
+def _pyarrow_get_schema_info(parquet_file: str) -> list[dict]:
+    """Get schema info using PyArrow (fast path for local files).
+
+    Returns list of dicts matching DuckDB's parquet_schema() format.
+    """
+    try:
+        pf = pq.ParquetFile(parquet_file)
+        schema = pf.schema_arrow
+        parquet_schema = pf.schema  # Physical Parquet schema
+        result = []
+
+        # Build a map from column name to Parquet physical schema for logical type lookup
+        parquet_col_map = {}
+        for i in range(len(parquet_schema)):
+            col = parquet_schema.column(i)
+            parquet_col_map[col.name] = col
+
+        # Get schema info with proper type mapping
+        for field in schema:
+            # First check Arrow schema for logical type (GeoArrow extension types)
+            logical_type = _get_pyarrow_logical_type(field)
+
+            # If not found in Arrow schema, check Parquet physical schema
+            # This handles native Parquet GEOMETRY/GEOGRAPHY logical types
+            if logical_type is None and field.name in parquet_col_map:
+                parquet_col = parquet_col_map[field.name]
+                if parquet_col.logical_type is not None:
+                    logical_type_str = str(parquet_col.logical_type)
+                    # PyArrow returns "Geometry(crs=srid:5070)" format
+                    # DuckDB returns "GeometryType(crs=srid:5070)" format
+                    if logical_type_str.startswith("Geometry("):
+                        # Convert to DuckDB format
+                        logical_type = "GeometryType" + logical_type_str[8:]
+                    elif logical_type_str.startswith("Geography("):
+                        logical_type = "GeographyType" + logical_type_str[9:]
+
+            col_info = {
+                "name": field.name,
+                "type": str(field.type),
+                "type_length": None,
+                "repetition_type": "OPTIONAL" if field.nullable else "REQUIRED",
+                "num_children": 0,
+                "converted_type": None,
+                "scale": None,
+                "precision": None,
+                "field_id": field.metadata.get(b"PARQUET:field_id", None)
+                if field.metadata
+                else None,
+                "logical_type": logical_type,
+            }
+
+            # Handle struct types
+            if hasattr(field.type, "num_fields"):
+                col_info["num_children"] = field.type.num_fields
+
+            result.append(col_info)
+
+            # Add child fields for struct types
+            if hasattr(field.type, "__iter__"):
+                for child_field in field.type:
+                    child_info = {
+                        "name": child_field.name,
+                        "type": str(child_field.type),
+                        "type_length": None,
+                        "repetition_type": "OPTIONAL" if child_field.nullable else "REQUIRED",
+                        "num_children": 0,
+                        "converted_type": None,
+                        "scale": None,
+                        "precision": None,
+                        "field_id": None,
+                        "logical_type": None,
+                    }
+                    result.append(child_info)
+
+        return result
+    except Exception as e:
+        raise GeoParquetError(f"Cannot read schema: {parquet_file}\n{str(e)}") from e
+
+
+def _get_pyarrow_logical_type(field) -> str | None:
+    """Extract logical type string from PyArrow field, including geo types.
+
+    Returns DuckDB-compatible logical type string like:
+    - GeometryType(crs=projjson:key_name)
+    - GeometryType(crs=srid:5070)
+    - GeometryType(crs={...})  (inline PROJJSON)
+    - GeometryType()  (no CRS)
+    """
+    # Check for extension type registered with PyArrow
+    if hasattr(field.type, "extension_name"):
+        ext_name = field.type.extension_name
+        if ext_name in (
+            "geoarrow.wkb",
+            "ogc.wkb",
+            "geoarrow.point",
+            "geoarrow.linestring",
+            "geoarrow.polygon",
+            "geoarrow.multipoint",
+            "geoarrow.multilinestring",
+            "geoarrow.multipolygon",
+            "geoarrow.geometry",
+        ):
+            # This is a geometry type - try to get CRS from extension metadata
+            if hasattr(field.type, "extension_metadata") and field.type.extension_metadata:
+                try:
+                    ext_meta = json.loads(field.type.extension_metadata)
+                    crs = ext_meta.get("crs")
+                    if crs:
+                        # Format CRS like DuckDB does
+                        if isinstance(crs, str):
+                            # Reference string like "projjson:key_name" or "srid:5070"
+                            return f"GeometryType(crs={crs})"
+                        elif isinstance(crs, dict):
+                            # Inline PROJJSON
+                            return f"GeometryType(crs={json.dumps(crs)})"
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            return "GeometryType()"
+
+    # Check field metadata for GeoArrow extension types (Arrow IPC schema stores these here)
+    if field.metadata:
+        ext_name = field.metadata.get(b"ARROW:extension:name")
+        if ext_name:
+            ext_name_str = ext_name.decode("utf-8") if isinstance(ext_name, bytes) else ext_name
+            if ext_name_str in (
+                "geoarrow.wkb",
+                "ogc.wkb",
+                "geoarrow.point",
+                "geoarrow.linestring",
+                "geoarrow.polygon",
+                "geoarrow.multipoint",
+                "geoarrow.multilinestring",
+                "geoarrow.multipolygon",
+                "geoarrow.geometry",
+            ):
+                # Get extension metadata
+                ext_meta_raw = field.metadata.get(b"ARROW:extension:metadata")
+                if ext_meta_raw:
+                    try:
+                        ext_meta_str = (
+                            ext_meta_raw.decode("utf-8")
+                            if isinstance(ext_meta_raw, bytes)
+                            else ext_meta_raw
+                        )
+                        ext_meta = json.loads(ext_meta_str)
+                        crs = ext_meta.get("crs")
+                        if crs:
+                            # Format CRS like DuckDB does
+                            if isinstance(crs, str):
+                                # Reference string like "projjson:key_name" or "srid:5070"
+                                return f"GeometryType(crs={crs})"
+                            elif isinstance(crs, dict):
+                                # Inline PROJJSON
+                                return f"GeometryType(crs={json.dumps(crs)})"
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                return "GeometryType()"
+
+    # Check for nested struct types
+    type_str = str(field.type)
+    if "struct" in type_str.lower():
+        return None
+
+    return None
+
+
+# =============================================================================
+# DuckDB Connection Management
+# =============================================================================
+
+
+def _get_connection_for_file(parquet_file: str, existing_con=None, load_spatial=True):
+    """Get or create DuckDB connection appropriate for file location.
+
+    Args:
+        parquet_file: Path or URL to the parquet file
+        existing_con: Existing connection to reuse
+        load_spatial: Whether to load spatial extension (default: True)
+                     Set to False for metadata-only operations to save ~100ms
+
+    Returns:
+        Tuple of (connection, should_close)
+    """
     from geoparquet_io.core.common import (
         get_duckdb_connection,
         get_duckdb_connection_for_s3,
@@ -30,10 +295,10 @@ def _get_connection_for_file(parquet_file: str, existing_con=None):
         return existing_con, False  # False = don't close
 
     if is_s3_url(parquet_file):
-        return get_duckdb_connection_for_s3(parquet_file, load_spatial=True), True
+        return get_duckdb_connection_for_s3(parquet_file, load_spatial=load_spatial), True
     else:
         return get_duckdb_connection(
-            load_spatial=True, load_httpfs=needs_httpfs(parquet_file)
+            load_spatial=load_spatial, load_httpfs=needs_httpfs(parquet_file)
         ), True
 
 
@@ -64,11 +329,20 @@ def get_kv_metadata(parquet_file: str, con=None) -> dict[bytes, bytes]:
 
     Returns dict like {b'geo': b'{"version": "1.1.0", ...}'}
 
+    For local files, uses PyArrow for ~300x faster reads.
+    For remote files (S3, HTTP), uses DuckDB with httpfs.
+
     Raises:
         GeoParquetError: If file is not a valid Parquet file or cannot be read.
     """
+    # Fast path: use PyArrow for local files (no existing connection required)
+    resolved_path = _resolve_local_path(parquet_file)
+    if _is_local_file(resolved_path) and con is None:
+        return _pyarrow_get_kv_metadata(resolved_path)
+
+    # Slow path: use DuckDB for remote files or when connection is provided
     safe_url = _safe_url(parquet_file)
-    connection, should_close = _get_connection_for_file(parquet_file, con)
+    connection, should_close = _get_connection_for_file(parquet_file, con, load_spatial=False)
 
     try:
         # Get raw bytes to avoid DuckDB's VARCHAR escaping
@@ -109,9 +383,18 @@ def get_geo_metadata(parquet_file: str, con=None) -> dict | None:
     Extract and parse 'geo' metadata key.
 
     Returns parsed GeoParquet metadata dict or None if not present.
+
+    For local files, uses PyArrow for ~300x faster reads.
+    For remote files (S3, HTTP), uses DuckDB with httpfs.
     """
+    # Fast path: use PyArrow for local files
+    resolved_path = _resolve_local_path(parquet_file)
+    if _is_local_file(resolved_path) and con is None:
+        return _pyarrow_get_geo_metadata(resolved_path)
+
+    # Slow path: use DuckDB for remote files or when connection is provided
     safe_url = _safe_url(parquet_file)
-    connection, should_close = _get_connection_for_file(parquet_file, con)
+    connection, should_close = _get_connection_for_file(parquet_file, con, load_spatial=False)
 
     try:
         # Get raw bytes and decode manually to avoid DuckDB's VARCHAR escaping
@@ -151,9 +434,18 @@ def get_file_metadata(parquet_file: str, con=None) -> dict:
     Get file-level metadata (num_rows, num_row_groups).
 
     Uses parquet_file_metadata() for fast access.
+
+    For local files, uses PyArrow for ~300x faster reads.
+    For remote files (S3, HTTP), uses DuckDB with httpfs.
     """
+    # Fast path: use PyArrow for local files
+    resolved_path = _resolve_local_path(parquet_file)
+    if _is_local_file(resolved_path) and con is None:
+        return _pyarrow_get_file_metadata(resolved_path)
+
+    # Slow path: use DuckDB for remote files or when connection is provided
     safe_url = _safe_url(parquet_file)
-    connection, should_close = _get_connection_for_file(parquet_file, con)
+    connection, should_close = _get_connection_for_file(parquet_file, con, load_spatial=False)
 
     try:
         result = connection.execute(f"""
@@ -172,9 +464,18 @@ def get_schema_info(parquet_file: str, con=None) -> list[dict]:
     Get schema column info using parquet_schema().
 
     Returns list of dicts with 'name', 'type', 'logical_type', etc.
+
+    For local files, uses PyArrow for ~300x faster reads.
+    For remote files (S3, HTTP), uses DuckDB with httpfs.
     """
+    # Fast path: use PyArrow for local files
+    resolved_path = _resolve_local_path(parquet_file)
+    if _is_local_file(resolved_path) and con is None:
+        return _pyarrow_get_schema_info(resolved_path)
+
+    # Slow path: use DuckDB for remote files or when connection is provided
     safe_url = _safe_url(parquet_file)
-    connection, should_close = _get_connection_for_file(parquet_file, con)
+    connection, should_close = _get_connection_for_file(parquet_file, con, load_spatial=False)
 
     try:
         result = connection.execute(f"""
