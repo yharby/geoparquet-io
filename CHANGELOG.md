@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta] - 2026-02-10
+
 ### Added
 
 - `--show-sql` option now available on all DuckDB-based commands (add, partition, sort, extract arcgis)
