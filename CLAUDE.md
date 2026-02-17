@@ -13,14 +13,11 @@ geoparquet-io (gpio) is a Python CLI tool for fast I/O and transformation of Geo
 ## Documentation Structure
 
 ### context/ Directory
-Contains ephemeral planning docs and durable reference documentation:
+Contains reference documentation for AI developers:
 
-- **context/shared/plans/** - Active feature plans and implementation strategies
-- **context/shared/documentation/** - Durable docs on specific topics/features for AI developers
-- **context/shared/reports/** - Analysis reports and architectural assessments
-- **context/shared/research/** - Auto-generated research from feature exploration
+- **context/shared/documentation/** - Durable docs (geometry handling, platform issues)
 
-**Important**: When starting work on any feature, check `context/README.md` for available documentation and read relevant docs before proceeding.
+Other subdirectories (`plans/`, `reports/`, `research/`) exist for future use but are currently empty.
 
 ---
 
@@ -58,13 +55,35 @@ Contains ephemeral planning docs and durable reference documentation:
 ```
 geoparquet_io/
 ├── cli/
-│   ├── main.py          # All CLI commands (~2200 lines)
+│   ├── main.py          # All CLI commands (~5400 lines)
 │   ├── decorators.py    # Reusable Click options - CHECK FIRST
 │   └── fix_helpers.py   # Check --fix helpers
-└── core/
-    ├── common.py        # Shared utilities (~1400 lines) - CHECK FIRST
-    ├── <command>.py     # Command implementations (extract, convert, etc.)
-    └── logging_config.py # Logging system
+├── core/                # 52 specialized modules
+│   ├── common.py        # Shared utilities (~4000 lines) - CHECK FIRST
+│   ├── add_*.py         # Add column implementations
+│   ├── partition_*.py   # Partitioning implementations
+│   ├── check_*.py       # Validation implementations
+│   └── logging_config.py
+└── api/
+    ├── table.py         # Table class with all operations
+    ├── ops.py           # Functional API
+    ├── check.py         # Validation API
+    ├── pipeline.py      # Pipeline operations
+    └── stac.py          # STAC metadata API
+```
+
+### CLI Command Groups
+
+```bash
+gpio add           # Enhance files (admin-divisions, bbox, h3, etc.)
+gpio convert       # Format/CRS conversion
+gpio extract       # Extract from files/services
+gpio inspect       # Inspect files (meta, preview, schema)
+gpio partition     # Partition files (quadkey, h3, s2, admin, etc.)
+gpio publish       # Publish (stac, upload)
+gpio sort          # Sort files (hilbert, geohash)
+gpio check         # Validate best practices
+gpio benchmark     # Performance testing
 ```
 
 ### Key Patterns
@@ -77,7 +96,7 @@ geoparquet_io/
 ### Critical Rules
 
 - **Never use `click.echo()` in `core/` modules** - Use logging helpers instead
-- **Every CLI command needs a Python API** - Add to `api/table.py` and `api/ops.py`
+- **Every CLI command needs a Python API** - Add to `api/table.py` (methods) and `api/ops.py` (functions)
 - **All documentation needs CLI + Python examples** - Use tabbed format
 
 ---
@@ -171,8 +190,8 @@ uv run xenon --max-absolute=A geoparquet_io/  # Aim for A grade
 # Inspect file structure
 gpio inspect file.parquet --verbose
 
-# Check metadata
-gpio inspect --meta file.parquet --json
+# Check metadata (note: 'meta' is a subcommand of 'inspect')
+gpio inspect meta file.parquet --json
 
 # Dry-run with SQL
 gpio extract input.parquet output.parquet --dry-run --show-sql
@@ -255,108 +274,14 @@ This ensures commands always use the correct virtual environment without manual 
 
 This maintains consistency across conversations and prevents reinventing already-solved problems.
 
-## Directives d'utilisation des outils MCP
+## MCP Distill Tools (Token Optimization)
 
-Utilisez les outils Distill MCP pour des opérations économes en tokens :
+| Action | Tool |
+|--------|------|
+| Read code for exploration | `mcp__distill__smart_file_read filePath="file.py"` |
+| Extract function/class | `mcp__distill__smart_file_read filePath="file.py" target={"type":"function","name":"fn"}` |
+| Compress build/test output | `mcp__distill__auto_optimize content="<large output>"` |
+| Multi-step operations | `mcp__distill__code_execute code="return ctx.files.glob('**/*.py')"` |
+| Before editing files | Use native `Read` tool (Edit requires Read first) |
 
-### Règle 1 : Lecture intelligente de fichiers
-
-Lors de la lecture de fichiers source pour **exploration ou compréhension** :
-
-```
-mcp__distill__smart_file_read filePath="path/to/file.ts"
-```
-
-**Quand utiliser Read natif à la place :**
-- Avant d'éditer un fichier (Edit nécessite Read d'abord)
-- Fichiers de configuration : `.json`, `.yaml`, `.toml`, `.md`, `.env`
-
-### Règle 2 : Compresser les sorties volumineuses
-
-Après les commandes Bash qui produisent une sortie volumineuse (>500 caractères) :
-
-```
-mcp__distill__auto_optimize content="<collez la sortie volumineuse>"
-```
-
-### Règle 3 : SDK d'exécution de code pour les opérations complexes
-
-Pour les opérations multi-étapes, utilisez `code_execute` au lieu de plusieurs appels d'outils (**98% d'économie de tokens**) :
-
-```
-mcp__distill__code_execute code="<code typescript>"
-```
-
-**API du SDK (`ctx`) :**
-
-*Compression :*
-- `ctx.compress.auto(content, hint?)` - Détection auto et compression
-- `ctx.compress.logs(logs)` - Résumer les logs
-- `ctx.compress.diff(diff)` - Compresser les git diff
-- `ctx.compress.semantic(content, ratio?)` - Compression TF-IDF
-
-*Code :*
-- `ctx.code.parse(content, lang)` - Parser en structure AST
-- `ctx.code.extract(content, lang, {type, name})` - Extraire un élément
-- `ctx.code.skeleton(content, lang)` - Obtenir les signatures uniquement
-
-*Fichiers :*
-- `ctx.files.read(path)` - Lire le contenu d'un fichier
-- `ctx.files.exists(path)` - Vérifier si un fichier existe
-- `ctx.files.glob(pattern)` - Trouver des fichiers par pattern
-
-*Git :*
-- `ctx.git.diff(ref?)` - Obtenir le diff git
-- `ctx.git.log(limit?)` - Historique des commits
-- `ctx.git.status()` - Statut du repo
-- `ctx.git.branch()` - Info sur les branches
-- `ctx.git.blame(file, line?)` - Git blame d'un fichier
-
-*Recherche :*
-- `ctx.search.grep(pattern, glob?)` - Rechercher un pattern dans les fichiers
-- `ctx.search.symbols(query, glob?)` - Rechercher des symboles (fonctions, classes)
-- `ctx.search.files(pattern)` - Rechercher des fichiers par pattern
-- `ctx.search.references(symbol, glob?)` - Trouver les références d'un symbole
-
-*Analyse :*
-- `ctx.analyze.dependencies(file)` - Analyser les imports/exports
-- `ctx.analyze.callGraph(fn, file, depth?)` - Construire le graphe d'appels
-- `ctx.analyze.exports(file)` - Obtenir les exports d'un fichier
-- `ctx.analyze.structure(dir?, depth?)` - Structure du répertoire avec analyse
-
-*Utilitaires :*
-- `ctx.utils.countTokens(text)` - Compter les tokens
-- `ctx.utils.detectType(content)` - Détecter le type de contenu
-- `ctx.utils.detectLanguage(path)` - Détecter le langage depuis le chemin
-
-**Exemples :**
-
-```typescript
-// Obtenir les squelettes de tous les fichiers TypeScript
-const files = ctx.files.glob("src/**/*.ts").slice(0, 5);
-return files.map(f => ({
-  file: f,
-  skeleton: ctx.code.skeleton(ctx.files.read(f), "typescript")
-}));
-
-// Compresser et analyser les logs
-const logs = ctx.files.read("server.log");
-return ctx.compress.logs(logs);
-
-// Extraire une fonction spécifique
-const content = ctx.files.read("src/api.ts");
-return ctx.code.extract(content, "typescript", { type: "function", name: "handleRequest" });
-```
-
-### Référence rapide
-
-| Action | Utiliser |
-|--------|----------|
-| Lire du code pour exploration | `mcp__distill__smart_file_read filePath="file.ts"` |
-| Obtenir une fonction/classe | `mcp__distill__smart_file_read filePath="file.ts" target={"type":"function","name":"myFunc"}` |
-| Compresser les erreurs de build | `mcp__distill__auto_optimize content="..."` |
-| Résumer les logs | `mcp__distill__summarize_logs logs="..."` |
-| Opérations multi-étapes | `mcp__distill__code_execute code="return ctx.files.glob('src/**/*.ts')"` |
-| Avant d'éditer | Utiliser l'outil natif `Read` |
-
-<!-- END DISTILL -->
+**code_execute SDK** (`ctx`): `ctx.files.{read,glob}`, `ctx.compress.{auto,logs}`, `ctx.code.{skeleton,extract}`, `ctx.search.{grep,symbols}`
