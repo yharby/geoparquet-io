@@ -125,6 +125,18 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
 
+      - name: Install GDAL (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y gdal-bin
+
+      - name: Install GDAL (macOS)
+        if: runner.os == 'macOS'
+        run: brew install gdal
+
+      - name: Install GDAL (Windows)
+        if: runner.os == 'Windows'
+        run: choco install gdal --yes
+
       - name: Install dependencies
         run: uv sync --all-extras
 
