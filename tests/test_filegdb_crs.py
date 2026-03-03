@@ -135,3 +135,152 @@ class TestFileGDBCrsDetection:
 
         # Should return None (not crash)
         assert crs is None
+
+
+@pytest.fixture
+def multi_layer_filegdb_path():
+    """Create a test FileGDB with multiple layers having different CRS.
+
+    This tests the edge case where tables in a FileGDB have different CRS.
+    Our implementation returns the first CRS found from a user table.
+    """
+    import subprocess
+    import uuid
+
+    unique_id = uuid.uuid4().hex[:8]
+    gdb_path = os.path.join(tempfile.gettempdir(), f"test_multi_crs_{unique_id}.gdb")
+
+    # Clean up any existing files
+    if os.path.exists(gdb_path):
+        shutil.rmtree(gdb_path)
+
+    # Create first layer in WGS84 (EPSG:4326)
+    geojson_4326 = os.path.join(tempfile.gettempdir(), f"layer_4326_{unique_id}.geojson")
+    with open(geojson_4326, "w") as f:
+        f.write("""{
+            "type": "FeatureCollection",
+            "features": [
+                {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-75.1, 39.9]}, "properties": {"id": 1}}
+            ]
+        }""")
+
+    # Create second layer in Web Mercator (EPSG:3857)
+    geojson_3857 = os.path.join(tempfile.gettempdir(), f"layer_3857_{unique_id}.geojson")
+    with open(geojson_3857, "w") as f:
+        f.write("""{
+            "type": "FeatureCollection",
+            "features": [
+                {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-8361663, 4859241]}, "properties": {"id": 1}}
+            ]
+        }""")
+
+    # Create FileGDB with first layer
+    result1 = subprocess.run(
+        [
+            "ogr2ogr",
+            "-f",
+            "OpenFileGDB",
+            gdb_path,
+            geojson_4326,
+            "-a_srs",
+            "EPSG:4326",
+            "-nln",
+            "layer_wgs84",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    if result1.returncode != 0:
+        for f in [geojson_4326, geojson_3857]:
+            if os.path.exists(f):
+                os.remove(f)
+        pytest.skip(f"ogr2ogr failed to create FileGDB: {result1.stderr}")
+
+    # Append second layer with different CRS
+    result2 = subprocess.run(
+        [
+            "ogr2ogr",
+            "-f",
+            "OpenFileGDB",
+            "-update",
+            "-append",
+            gdb_path,
+            geojson_3857,
+            "-a_srs",
+            "EPSG:3857",
+            "-nln",
+            "layer_mercator",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    if result2.returncode != 0:
+        for f in [geojson_4326, geojson_3857]:
+            if os.path.exists(f):
+                os.remove(f)
+        if os.path.exists(gdb_path):
+            shutil.rmtree(gdb_path)
+        pytest.skip(f"ogr2ogr failed to append layer: {result2.stderr}")
+
+    yield gdb_path
+
+    # Cleanup
+    if os.path.exists(gdb_path):
+        shutil.rmtree(gdb_path)
+    for f in [geojson_4326, geojson_3857]:
+        if os.path.exists(f):
+            os.remove(f)
+
+
+class TestFileGDBMultiLayerCrs:
+    """Tests for FileGDB with multiple layers having different CRS."""
+
+    def test_multi_layer_filegdb_returns_a_crs(self, multi_layer_filegdb_path):
+        """Test that CRS detection returns a valid CRS from multi-layer FileGDB.
+
+        Note: Our implementation returns the first CRS found when iterating
+        through .gdbtable files. For FileGDBs with mixed CRS, users should
+        specify --crs explicitly or use layer selection.
+        """
+        con = get_duckdb_connection(load_spatial=True)
+
+        crs = detect_crs_from_spatial_file(multi_layer_filegdb_path, con, verbose=False)
+
+        # Should return one of the CRS values (either 4326 or 3857)
+        assert crs is not None, "Should detect CRS from multi-layer FileGDB"
+
+        # Extract the EPSG code
+        if "id" in crs:
+            code = crs["id"]["code"]
+            assert code in [4326, 3857], f"Expected EPSG:4326 or EPSG:3857, got {code}"
+        else:
+            # PROJJSON format - check name
+            crs_str = str(crs)
+            assert (
+                "4326" in crs_str
+                or "3857" in crs_str
+                or "WGS 84" in crs_str
+                or "Mercator" in crs_str
+            )
+
+    def test_multi_layer_filegdb_has_two_layers(self, multi_layer_filegdb_path):
+        """Verify the test fixture actually created two layers."""
+        con = get_duckdb_connection(load_spatial=True)
+
+        # Count .gdbtable files that aren't system tables
+        gdbtable_count = 0
+        for f in os.listdir(multi_layer_filegdb_path):
+            if f.endswith(".gdbtable"):
+                path = os.path.join(multi_layer_filegdb_path, f)
+                try:
+                    result = con.execute(f"SELECT * FROM ST_Read_Meta('{path}')").fetchone()
+                    if result and result[3]:
+                        for layer in result[3]:
+                            if not layer.get("name", "").startswith("GDB_"):
+                                gdbtable_count += 1
+                except Exception:
+                    pass
+
+        assert gdbtable_count >= 2, f"Expected at least 2 user layers, found {gdbtable_count}"
