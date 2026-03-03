@@ -7,147 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+## [1.0.0-beta] - 2026-02-10
 
-- **Fast bbox-stats spatial ordering check** - GeoParquet 2.0+ files (with bbox column) now use a much faster method (~10-100x) for checking spatial ordering by analyzing row group statistics instead of sampling geometry data. Falls back automatically to sampling method for GeoParquet 1.x files. ([#109](https://github.com/geoparquet/geoparquet-io/issues/109))
-
-### Removed (Breaking Changes)
-
-- **Deprecated CLI commands removed** - The following deprecated commands have been removed. Use the replacements shown below:
-  - `gpio reproject` → Use `gpio convert reproject` instead
-  - `gpio meta` → Use `gpio inspect meta` instead
-  - `gpio stac` → Use `gpio publish stac` instead
-  - `gpio upload` → Use `gpio publish upload` instead
-  - `gpio validate` → Use `gpio check spec` instead
-
-  **Migration Guide**: Update your scripts and workflows to use the new command names. The new commands have the same functionality and options as the deprecated versions.
-
-## [0.4.0] - 2025-11-17
-
-### Added
-- `gpio convert` command for optimized GeoParquet conversion from vector formats (Shapefile, GeoJSON, GeoPackage, GDB, CSV/TSV) ([#56](https://github.com/geoparquet/geoparquet-io/pull/56))
-- `gpio stac` command for STAC Item and Collection generation ([#57](https://github.com/geoparquet/geoparquet-io/pull/57))
-- `gpio check stac` command for STAC validation ([#57](https://github.com/geoparquet/geoparquet-io/pull/57))
-- `--prefix` option for partition commands to customize output filenames ([#62](https://github.com/geoparquet/geoparquet-io/pull/62))
-
-### Changed
-- Documentation consolidated with snippets system ([#55](https://github.com/geoparquet/geoparquet-io/pull/55))
-
-## [0.3.0] - 2025-11-06
-
-### Added
-- `gpio meta` command for deep inspection of Parquet and GeoParquet metadata ([#46](https://github.com/geoparquet/geoparquet-io/pull/46))
-- Multi-level admin boundary partitioning with GAUL and Overture Maps datasets ([#38](https://github.com/geoparquet/geoparquet-io/pull/38))
-- Code quality checks with vulture and xenon to CI workflow ([#48](https://github.com/geoparquet/geoparquet-io/pull/48), [#49](https://github.com/geoparquet/geoparquet-io/pull/49), [#50](https://github.com/geoparquet/geoparquet-io/pull/50))
-
-### Changed
-- GitHub Actions dependency updates ([#39](https://github.com/geoparquet/geoparquet-io/pull/39), [#40](https://github.com/geoparquet/geoparquet-io/pull/40), [#41](https://github.com/geoparquet/geoparquet-io/pull/41), [#42](https://github.com/geoparquet/geoparquet-io/pull/42))
-
-## [0.2.0] - 2025-10-24
-
-### Added
-- MkDocs documentation site with GitHub Pages deployment ([#35](https://github.com/geoparquet/geoparquet-io/pull/35))
-  - Comprehensive user guide and CLI reference
-  - API documentation
-  - Real-world examples
-  - Published at https://geoparquet.io/
-
-### Changed
-- Consolidated 177 lines of duplicated CLI option definitions into reusable decorators ([#36](https://github.com/geoparquet/geoparquet-io/pull/36))
-
-## [0.1.0] - 2025-10-19
+This is the first beta release of geoparquet-io 1.0, featuring major new spatial indexing systems, auto-resolution partitioning, comprehensive `--overwrite` support, and significant performance improvements.
 
 ### Added
 
-#### Package & CLI
-- Renamed package from `geoparquet-tools` to `geoparquet-io` for clearer purpose
-- New CLI command: `gpio` (GeoParquet I/O) for all operations
-- Legacy `gt` command maintained as alias for backwards compatibility
-- Version flag: `gpio --version` displays current version
-- Comprehensive help text for all commands with usage examples
+#### New Spatial Indexing Systems
+- **S2 support**: Add S2 cell indexing with `gpio add s2` and `gpio partition s2`
+  - Full S2 geometry library integration for spherical indexing
+  - Auto-resolution support for optimal cell sizing
+- **A5Geo support**: Add A5 hexagonal indexing with `gpio add a5` and `gpio partition a5`
+  - Efficient pentagonal/hexagonal global grid system
+  - Auto-resolution partitioning support
 
-#### Development Tools
-- Migrated to `uv` package manager for faster, more reproducible builds
-- Added `ruff` for linting and code formatting with comprehensive ruleset
-- Setup pre-commit hooks for automated code quality checks
-- Added custom pytest markers (`slow`, `network`) for better test organization
-- Created `CONTRIBUTING.md` with detailed development guidelines
-- Created `CHANGELOG.md` for tracking changes
+#### Auto-Resolution Partitioning
+- Automatic resolution selection for H3, S2, A5, and quadkey partitioning
+  - Analyzes data extent and density to choose optimal resolution
+  - Use `--resolution auto` or omit resolution for automatic selection
+  - Verbose output shows resolution selection reasoning
 
-#### CI/CD
-- GitHub Actions workflow for automated testing
-- Lint job using ruff for code quality enforcement
-- Test matrix covering Python 3.9-3.13 on Linux, macOS, and Windows
-- Code coverage reporting with pytest-cov
-- Optimized CI with uv caching for faster runs
+#### Sub-Partitioning for Large Files
+- `--min-size` option to find and re-partition oversized partition files
+- `--in-place` option for in-place sub-partitioning
+- Directory input support for batch sub-partitioning operations
+- New `find_large_files()` and `sub_partition_directory()` Python API functions
 
-#### Core Features
-- **Spatial Sorting**: Hilbert curve ordering for optimal spatial locality
-- **Bbox Operations**: Add bbox columns and metadata for query performance
-- **H3 Support**: H3 hexagonal cell ID support via DuckDB H3 extension ([#23](https://github.com/geoparquet/geoparquet-io/pull/23))
-  - `gpio add h3` and `gpio partition h3` commands
-  - H3 columns excluded from partition output by default (configurable)
-  - Enhanced metadata system for custom covering metadata (bbox + H3) in GeoParquet 1.1 spec
-- **KD-tree Partitioning**: Balanced spatial partitioning support ([#30](https://github.com/geoparquet/geoparquet-io/pull/30))
-  - `gpio add kdtree` and `gpio partition kdtree` commands
-  - Auto-select partitions targeting ~120k rows using approximate mode
-  - Exact computation mode available for deterministic results
-- **Inspect Command**: Fast metadata inspection ([#31](https://github.com/geoparquet/geoparquet-io/pull/31))
-  - Optional data preview with `--head`/`--tail` flags
-  - Column statistics with `--stats` flag
-  - JSON output support with `--json` flag
-- **Country Codes**: Spatial join with admin boundaries to add ISO codes
-- **Partitioning**: Split files by string columns or admin divisions
-  - Support for Hive-style partitioning
-  - Preview mode to inspect partitions before creating
-  - Character prefix partitioning
-  - Intelligent partition strategy analysis with configurable thresholds
-  - `--force` to override warnings, `--skip-analysis` for performance
-- **Checking**: Validate GeoParquet files against best practices
-  - Compression settings
-  - Spatial ordering
-  - Bbox structure and metadata
-  - Row group optimization
+#### Admin Dataset Caching
+- `--cache` / `--no-cache` options for `gpio add admin-divisions`
+- Automatic caching of downloaded admin boundary datasets
+- `--prefix` option for custom column naming in admin-divisions
 
-#### Output Options
-- Configurable compression (ZSTD, GZIP, BROTLI, LZ4, SNAPPY, UNCOMPRESSED)
-- Compression level control for supported formats
-- Flexible row group sizing (by count or size)
-- Automatic metadata preservation and enhancement
-- GeoParquet 1.1 format support with bbox covering metadata
+#### CLI Improvements
+- `--show-sql` option on all DuckDB-based commands for query transparency
+- `--verbose` option added to inspect subcommands and publish upload
+- Progress reporting for add h3, add quadkey, and sort column commands
+- `--row-group-size` and `--row-group-size-mb` options for convert command
+- `--overwrite` option added to all extract, sort, and add commands
+- Shell completion documentation for bash, zsh, and fish
+
+#### Performance & Benchmarking
+- Comprehensive benchmark suite for performance testing
+- Persistent baseline storage and trend analysis for releases
+- Profiling integration with benchmark suite
+
+#### Spatial Order Detection
+- `bbox-stats` based spatial order checking
+- Auto-detection of spatial clustering in check command
+- Bbox overlap detection for order validation
 
 ### Changed
 
-- Updated README.md with `gpio` command examples throughout
-- Improved CLI help messages and command documentation
-- All commands now reference `gpio` instead of `gt` in user-facing messages
-- Organized code into clear `core/` and `cli/` modules
-- Centralized common utilities in `core/common.py`
-  - Created generic `add_computed_column` helper to minimize boilerplate
-- Standardized compression and metadata handling across all commands
+- **BREAKING**: Renamed `--profile` to `--aws-profile` for clarity
+  - Only affects AWS S3 operations (convert, extract, upload commands)
+  - Local operations no longer have this flag
+
+- **BREAKING**: Removed `--profile` flag from local commands
+  - Affects: add, partition, sort, check, inspect, publish stac
+  - Follows Arrow-based pipeline: extract/convert → transform locally → upload
+
+- Improved inspect performance via DuckDB connection reuse
+- Set `arrow_large_buffer_size=true` by default for large dataset support
+- Better handling of larger files with faster writes
+
+### Removed
+
+- **BREAKING**: Removed `gpio inspect legacy` command
+  - Use subcommands: `gpio inspect head/tail/stats/meta`
+- Removed deprecated CLI commands and guide documentation
 
 ### Fixed
 
-- Proper handling of Hive-partitioned files in metadata operations
-- Consistent bbox metadata format across all output operations
-- Improved error messages and validation
-- Fixed linting issues across codebase (exception handling, imports, etc.)
+- Fix CRS export for GDAL formats (fixes #189, #190)
+  - Projected CRS now correctly roundtrips through FlatGeobuf and GeoPackage
+- Fix crash on non-numeric CRS codes like IGNF:LAMB93 (#193)
+- Fix inspect metadata performance regression (#232)
+- Fix CRS extraction when geoarrow-pyarrow is imported
+- Fix Windows file locking errors in tests
+- Fix DuckDB connection leak in convert_to_geoparquet
+- Improved error messages for common user mistakes (#140)
+  - Invalid Parquet files now show helpful hints
 
-### Infrastructure
+### Internal
 
-- Added `.pre-commit-config.yaml` for automated checks
-- Added `pyproject.toml` configuration for all tools
-- Generated `uv.lock` for reproducible installs
-- Added `.ruff_cache` to `.gitignore`
-- Updated `.github/workflows/tests.yml` with lint and test jobs
-
-## [0.0.1] - 2024-10-10 (Previous - geoparquet-tools)
-
-Initial release as `geoparquet-tools` with basic functionality.
-
-[Unreleased]: https://github.com/geoparquet/geoparquet-io/compare/v0.4.0...HEAD
-[0.4.0]: https://github.com/geoparquet/geoparquet-io/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/geoparquet/geoparquet-io/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/geoparquet/geoparquet-io/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/geoparquet/geoparquet-io/releases/tag/v0.1.0
-[0.0.1]: https://github.com/cholmes/geoparquet-tools/releases/tag/v0.0.1
+- Reduced complexity in 6 functions from Grade E/D to Grade C
+- Comprehensive test coverage improvements
+- Plugin system documentation
+- Dependency updates (actions/checkout v6, astral-sh/setup-uv v7, etc.)
