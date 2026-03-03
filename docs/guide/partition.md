@@ -173,11 +173,8 @@ Use `--auto` to let gpio calculate the optimal H3 resolution:
     gpio partition h3 input.parquet --auto --preview
     ```
 
-=== "Python"
-
-    ```python
-    # Not yet implemented in Python API
-    ```
+!!! note "CLI-Only Feature"
+    Auto-resolution is currently CLI-only. For Python, use `partition_by_h3()` with an explicit `resolution` parameter (see examples above).
 
 Auto-resolution calculates the optimal H3 resolution using the formula: `cells ≈ 122 × 7^resolution`. The algorithm targets your specified rows per partition while respecting the `--max-partitions` constraint.
 
@@ -255,11 +252,8 @@ Use `--auto` to let gpio calculate the optimal S2 level:
     gpio partition s2 input.parquet --auto --preview
     ```
 
-=== "Python"
-
-    ```python
-    # Not yet implemented in Python API
-    ```
+!!! note "CLI-Only Feature"
+    Auto-resolution is currently CLI-only. For Python, use `partition_by_s2()` with an explicit `level` parameter (see examples above).
 
 Auto-resolution calculates the optimal S2 level using the formula: `cells = 6 × 4^level`. The algorithm targets your specified rows per partition while respecting the `--max-partitions` constraint.
 
@@ -291,23 +285,11 @@ Partition by A5 (S2-based) spatial cells:
 
 === "Python"
 
-    ```python
-    import geoparquet_io as gpio
-
-    # Partition by A5 (Hive-style by default)
-    gpio.read('input.parquet').partition_by_a5('output/')
-
-    # Custom resolution
-    gpio.read('input.parquet').partition_by_a5('output/', resolution=10)
-
-    # With options
-    gpio.read('input.parquet').partition_by_a5(
-        'output/',
-        resolution=12,
-        compression='ZSTD',
-        overwrite=True
-    )
-    ```
+    !!! note "CLI-Only"
+        A5 partitioning is currently CLI-only. Use S2 partitioning in Python as an alternative:
+        ```python
+        gpio.read('input.parquet').partition_by_s2('output/', level=10)
+        ```
 
 **Column behavior:**
 
@@ -337,11 +319,8 @@ Use `--auto` to let gpio calculate the optimal A5 resolution:
     gpio partition a5 input.parquet --auto --preview
     ```
 
-=== "Python"
-
-    ```python
-    # Not yet implemented in Python API
-    ```
+!!! note "CLI-Only Feature"
+    Auto-resolution is currently CLI-only. A5 partitioning in Python is not yet available.
 
 Auto-resolution calculates the optimal A5 resolution using the formula: `cells = 6 × 4^resolution`. The algorithm targets your specified rows per partition while respecting the `--max-partitions` constraint.
 
@@ -421,9 +400,8 @@ Use `--auto` to let gpio calculate the optimal quadkey zoom level:
 
 === "Python"
 
-    ```python
-    # Not yet implemented in Python API
-    ```
+!!! note "CLI-Only Feature"
+    Auto-resolution is currently CLI-only. For Python, use `partition_by_quadkey()` with an explicit `partition_resolution` parameter (see examples above).
 
 Auto-resolution calculates the optimal quadkey zoom level using the formula: `tiles = 4^zoom`. The algorithm targets your specified rows per partition while respecting the `--max-partitions` constraint.
 
