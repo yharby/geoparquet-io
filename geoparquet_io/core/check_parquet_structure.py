@@ -67,7 +67,7 @@ def assess_row_group_size(
                 "Row group size may be excessively small for queries directly from a web frontend",
                 "yellow",
             )
-        elif avg_group_size_mb > 128 and avg_group_size_mb < 256:
+        elif avg_group_size_mb > 128 and avg_group_size_mb <= 256:
             return (
                 "suboptimal",
                 "Row group size may be excessively large for queries directly from a web frontend",
