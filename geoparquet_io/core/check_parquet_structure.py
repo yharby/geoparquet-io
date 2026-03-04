@@ -64,14 +64,27 @@ def assess_row_group_size(
         if avg_group_size_mb < 1.5:
             return (
                 "suboptimal",
-                "Row group size may be excessively small for file consumed queried directly from a web frontend",
+                "Row group size may be excessively small for queries directly from a web frontend",
                 "yellow",
             )
-        return (
-            "optimal",
-            "Row group size could be appropriate for file queried directly from a web frontend",
-            "green",
-        )
+        elif avg_group_size_mb > 128 and avg_group_size_mb < 256:
+            return (
+                "suboptimal",
+                "Row group size may be excessively large for queries directly from a web frontend",
+                "yellow",
+            )
+        elif avg_group_size_mb > 256:
+            return (
+                "poor",
+                "Row group size is too large for queries directly from a web frontend",
+                "red",
+            )
+        else:
+            return (
+                "optimal",
+                "Row group size could be appropriate for queries directly from a web frontend",
+                "green",
+            )
 
     if 64 <= avg_group_size_mb <= 256:
         return "optimal", "Row group size is optimal (64-256 MB)", "green"

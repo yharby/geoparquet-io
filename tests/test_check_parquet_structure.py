@@ -72,6 +72,16 @@ class TestAssessRowGroupSize:
         assert status == "optimal"
         assert color == "green"
 
+    def test_excessively_large_for_web(self):
+        """Test poor status for very large row groups."""
+        total_size = 2000 * 1024 * 1024  # 2 GB total
+        avg_group_size = 300 * 1024 * 1024  # 300 MB
+        status, message, color = assess_row_group_size(
+            avg_group_size, total_size, profile=CheckProfile.web
+        )
+        assert status == "poor"
+        assert color == "red"
+
     def test_suboptimal_for_excessively_small_groups_on_web(self):
         """Test poor status for very large row groups."""
         total_size = 2000 * 1024 * 1024  # 2 GB total

@@ -7,8 +7,6 @@ for determining pass/fail status and extracting warnings and failures.
 
 from __future__ import annotations
 
-from geoparquet_io.core.check_parquet_structure import CheckProfile
-
 
 class CheckResult:
     """
@@ -30,20 +28,16 @@ class CheckResult:
         ...     print("Failures:", result.failures())
     """
 
-    def __init__(
-        self, results: dict, check_type: str = "check", profile: CheckProfile | None = None
-    ):
+    def __init__(self, results: dict, check_type: str = "check"):
         """
         Initialize a CheckResult.
 
         Args:
             results: Raw results dictionary from check operation
             check_type: Type of check (e.g., "spatial", "compression", "all")
-            profile: Check profile to use for parquet best practice checks
         """
         self._results = results
         self._check_type = check_type
-        self._profile = profile
 
     def passed(self) -> bool:
         """
