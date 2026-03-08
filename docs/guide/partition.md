@@ -49,7 +49,7 @@ The auto-resolution calculation uses these cell count formulas:
 |-------|---------|-------|
 | **H3** | `cells ≈ 122 × 7^resolution` | Hexagonal cells |
 | **S2** | `cells = 6 × 4^level` | Spherical cells |
-| **A5** | `cells = 6 × 4^resolution` | S2-based |
+| **A5** | `cells = 6 × 4^resolution` | Equal-area cells |
 | **Quadkey** | `tiles = 4^zoom` | Square tiles |
 
 ## By String Column
@@ -259,7 +259,7 @@ Auto-resolution calculates the optimal S2 level using the formula: `cells = 6 ×
 
 ## By A5 Cells
 
-Partition by A5 (S2-based) spatial cells:
+Partition by A5 spatial cells:
 
 === "CLI"
 

@@ -13,7 +13,7 @@ Fast I/O and transformation tools for GeoParquet files using PyArrow and DuckDB.
 - **Pipeable**: Chain commands with Unix pipes using Arrow IPC streaming - no intermediate files
 - **Comprehensive**: Sort, extract, partition, enhance, validate, and upload GeoParquet files
 - **Cloud-Native**: Read from and write to S3, GCS, Azure, and HTTPS sources
-- **Spatial Indexing**: Add bbox, H3 hexagonal cells, KD-tree partitions, and admin divisions
+- **Spatial Indexing**: Add bbox, H3 hexagonal cells, A5 equal-area cells, S2 spherical cells, KD-tree partitions, and admin divisions
 - **Best Practices**: Automatic optimization following GeoParquet 1.1 and 2.0 specs
 - **Parquet Geo Types support**: Read and write Parquet geometry and geography types
 - **Flexible**: CLI and Python API for any workflow

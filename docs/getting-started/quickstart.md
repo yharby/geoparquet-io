@@ -97,6 +97,12 @@ Enhance your data with additional spatial indexing:
 # Add H3 hexagonal cell IDs (resolution 9 ≈ 105m² cells)
 gpio add h3 input.parquet output_h3.parquet --resolution 9
 
+# Add A5 cell IDs
+gpio add a5 input.parquet output_a5.parquet --resolution 15
+
+# Add S2 spherical cell IDs
+gpio add s2 input.parquet output_s2.parquet --level 13
+
 # Add KD-tree partition IDs (auto-selects optimal partition count)
 gpio add kdtree input.parquet output_kdtree.parquet
 

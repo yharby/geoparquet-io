@@ -140,6 +140,41 @@ gpio add h3 input.parquet output.parquet --resolution 9
 gpio.read('input.parquet').add_h3(resolution=9).write('output.parquet')
 ```
 
+
+### A5 Cells
+
+A5 is a spatial indexing system that divides the world into equal-area pentagonal cells.
+
+**Use for:**
+- Aggregating data to equal-area grid (e.g., heatmaps)
+- Joining datasets using A5 as a common key
+- Uniform global coverage analysis
+
+```bash
+# CLI
+gpio add a5 input.parquet output.parquet --resolution 15
+
+# Python
+gpio.read('input.parquet').add_a5(resolution=15).write('output.parquet')
+```
+
+
+### S2 Spherical Cells
+
+Google's S2 geometry library divides the Earth into hierarchical cells using quadtree subdivision on a sphere.
+
+**Use for:**
+- Hierarchical spatial indexing
+- Integration with S2-based systems (BigQuery, etc.)
+
+```bash
+# CLI
+gpio add s2 input.parquet output.parquet --level 13
+
+# Python
+gpio.read('input.parquet').add_s2(level=13).write('output.parquet')
+```
+
 ### Quadkey Tiles
 
 Quadkeys identify web map tiles at specific zoom levels.
@@ -179,6 +214,8 @@ gpio.read('input.parquet').add_kdtree().write('output.parquet')
 | Column | Cell Shape | Resolution Range | Best For |
 |--------|------------|------------------|----------|
 | **H3** | Hexagon | 0-15 | Aggregations, joins, uniform coverage |
+| **A5** | Pentagon | 0-31 | Equal-area aggregations, joins & analysis |
+| **S2** | Quad | 0-30 | Global datasets, hierarchical indexing |
 | **Quadkey** | Square | 0-23 | Web mapping, tile workflows |
 | **KD-tree** | Varies | 1-20 | Clustered data, balanced partitions |
 
@@ -213,6 +250,7 @@ Partitioning splits data into multiple files based on spatial location.
 # Auto-calculate optimal resolution (recommended)
 gpio partition h3 input.parquet output_dir/ --auto
 gpio partition s2 input.parquet output_dir/ --auto
+gpio partition a5 input.parquet output_dir/ --auto
 gpio partition quadkey input.parquet output_dir/ --auto
 
 # Or specify resolution manually
@@ -280,9 +318,11 @@ gpio.read('input.parquet') \
 ### For Analysis Workloads
 
 ```bash
-# Add H3 for aggregation, quadkey for mapping
+# Add H3/A5 for aggregation, S2 for spherical analysis, quadkey for mapping
 gpio add bbox input.parquet | \
     gpio add h3 --resolution 9 - | \
+    gpio add a5 --level 13 - | \
+    gpio add s2 --level 13 - | \
     gpio add quadkey --resolution 12 - | \
     gpio sort hilbert - enriched.parquet
 ```
@@ -293,7 +333,7 @@ gpio add bbox input.parquet | \
 |-----------|---------|---------------------------|
 | **Bbox column** | Enable row group filtering | **Yes** (with sorting) |
 | **Hilbert sorting** | Cluster nearby features | **Yes** (makes bbox useful) |
-| **H3/Quadkey columns** | Analysis and joins | No (for analysis only) |
+| **H3/A5/S2/Quadkey columns** | Analysis and joins | No (for analysis only) |
 | **Partitioning** | Split into files | No (for very large datasets) |
 
 ## Verifying Optimization
@@ -313,5 +353,5 @@ This verifies:
 
 - [Best Practices](best-practices.md) - Optimization techniques
 - [Sort Command](../cli/sort.md) - Hilbert and quadkey sorting
-- [Add Command](../cli/add.md) - Adding bbox, H3, quadkey columns
+- [Add Command](../cli/add.md) - Adding bbox, H3, A5, S2, quadkey columns
 - [Partition Command](../cli/partition.md) - Partitioning strategies
