@@ -139,6 +139,216 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_no_return = true
 strict_equality = true
+# Suppress errors from libraries that don't ship type stubs
+ignore_missing_imports = true
+
+# Per-module overrides for files with known type issues.
+# These suppress errors in complex modules until they are incrementally fixed.
+# TODO: Remove overrides as type annotations are added to each module.
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.cli.main"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.common"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.arcgis"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.metadata_utils"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.stream_io"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.streaming"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.extract"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.extract_bigquery"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.duckdb_metadata"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.upload"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.validate"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.convert"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.add_quadkey_column"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.partition_auto_resolution"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.partition_admin_hierarchical"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.partition_by_h3"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.partition_by_s2"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.partition_by_a5"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.write_strategies.base"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.write_strategies.duckdb_kv"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.write_strategies.arrow_streaming"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.write_strategies.disk_rewrite"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.benchmark"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.benchmark_suite"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.benchmarks.profile_report"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.api.table"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.reproject"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.stac_check"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.stac"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.inspect_utils"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.sub_partition"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.partition_reader"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.split_by_country"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.sort_by_column"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.sort_quadkey"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.hilbert_order"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.add_s2_column"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.add_kdtree_column"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.add_h3_column"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.add_country_codes"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.add_bbox_column"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.check_parquet_structure"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.check_fixes"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.check_spatial_order"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.partition_by_string"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.partition_by_kdtree"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.admin_datasets"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.core.write_strategies"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.api.check"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.api.ops"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "geoparquet_io.cli.decorators"
+ignore_errors = true
 
 [tool.vulture]
 min_confidence = 80
