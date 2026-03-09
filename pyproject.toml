@@ -69,6 +69,7 @@ dev = [
     "radon>=6.0.1",
     "xenon>=0.9.3",
     "codespell>=2.2",
+    "import-linter>=2.0",
 ]
 docs = [
     "mkdocs>=1.5.0",
@@ -231,6 +232,34 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "if __name__ == .__main__.:",
 ]
+
+[tool.importlinter]
+root_package = "geoparquet_io"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+id = "core-no-click"
+name = "Core modules must not import Click"
+type = "forbidden"
+source_modules = ["geoparquet_io.core"]
+forbidden_modules = ["click"]
+# TODO: These are existing violations to be fixed incrementally. New code must not import click in core/.
+# Direct click imports in existing core modules are ignored until cleaned up.
+# The indirect path (benchmark_suite -> geoparquet_io root -> cli.main -> click)
+# is also excluded since benchmark_suite lazily imports __version__ from the root package.
+ignore_imports = [
+    "geoparquet_io.core.* -> click",
+    "geoparquet_io.core.benchmark_suite -> geoparquet_io",
+]
+# Alert when ignored patterns no longer match any actual imports (stale ignores)
+unmatched_ignore_imports_alerting = "warn"
+
+[[tool.importlinter.contracts]]
+id = "api-no-cli"
+name = "API modules must not import CLI"
+type = "forbidden"
+source_modules = ["geoparquet_io.api"]
+forbidden_modules = ["geoparquet_io.cli"]
 
 [dependency-groups]
 dev = [

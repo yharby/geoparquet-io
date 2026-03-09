@@ -40,6 +40,16 @@ repos:
     - id: xenon
       args: ['--max-absolute=E', '--max-modules=D', '--max-average=C']
 
+    # enforce architecture: core must not import click, api must not import cli
+  - repo: local
+    hooks:
+    - id: import-linter
+      name: import-linter
+      entry: uv run lint-imports
+      language: system
+      pass_filenames: false
+      always_run: true
+
     # enforce logger usage over click.echo in core/
   - repo: local
     hooks:
