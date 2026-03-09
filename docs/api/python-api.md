@@ -356,21 +356,6 @@ table = gpio.read('input.parquet').add_s2(level=10)
 table = gpio.read('input.parquet').add_s2(column_name='s2_index', level=15)
 ```
 
-#### `add_a5(column_name='a5_cell', resolution=15)`
-
-Add an A5 cell column based on geometry location.
-
-```python
-# Default resolution (15)
-table = gpio.read('input.parquet').add_a5()
-
-# Lower resolution for larger cells
-table = gpio.read('input.parquet').add_a5(resolution=10)
-
-# Custom column name
-table = gpio.read('input.parquet').add_a5(column_name='a5_index', resolution=12)
-```
-
 #### `add_kdtree(column_name='kdtree_cell', iterations=9, sample_size=100000)`
 
 Add a KD-tree cell column for data-adaptive spatial partitioning.
@@ -547,7 +532,7 @@ print(f"Created {stats['file_count']} files")
 
 #### `partition_by_a5(output_dir, resolution=15, compression='ZSTD', hive=True, overwrite=False)`
 
-Partition the table into a Hive-partitioned directory by A5 cell.
+Partition the table into a Hive-partitioned directory by A5 (S2-based) cell.
 
 ```python
 # Partition by A5
@@ -663,7 +648,7 @@ result = sub_partition_directory(
 
 **Parameters:**
 - `directory` (str): Directory containing parquet files
-- `partition_type` (str): Type of partition ("h3", "a5", "s2", "quadkey")
+- `partition_type` (str): Type of partition ("h3", "s2", "quadkey")
 - `min_size_bytes` (int): Minimum file size to process
 - `resolution` (int | None): Resolution for H3/quadkey (0-15 for H3)
 - `level` (int | None): Level for S2 (alias for resolution)
@@ -963,7 +948,6 @@ pq.write_table(table, 'output.parquet')
 | `ops.add_bbox(table, column_name='bbox', geometry_column=None)` | Add bounding box column |
 | `ops.add_quadkey(table, column_name='quadkey', resolution=13, use_centroid=False, geometry_column=None)` | Add quadkey column |
 | `ops.add_h3(table, column_name='h3_cell', resolution=9, geometry_column=None)` | Add H3 cell column |
-| `ops.add_a5(table, column_name='a5_cell', resolution=15, geometry_column=None)` | Add A5 cell column |
 | `ops.add_s2(table, column_name='s2_cell', level=13, geometry_column=None)` | Add S2 cell column |
 | `ops.add_kdtree(table, column_name='kdtree_cell', iterations=9, sample_size=100000, geometry_column=None)` | Add KD-tree cell column |
 | `ops.sort_hilbert(table, geometry_column=None)` | Reorder by Hilbert curve |

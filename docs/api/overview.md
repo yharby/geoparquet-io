@@ -86,8 +86,6 @@ See [Python API Reference - Pipeline Composition](python-api.md#pipeline-composi
 |--------|-------------|
 | `.add_bbox()` | Add bounding box column |
 | `.add_h3(resolution)` | Add H3 hexagonal cell column |
-| `.add_a5(resolution)` | Add A5 cell column |
-| `.add_s2(level)` | Add S2 cell column |
 | `.add_quadkey(resolution)` | Add quadkey tile column |
 | `.add_kdtree()` | Add KD-tree partition column |
 | `.sort_hilbert()` | Sort by Hilbert space-filling curve |

@@ -194,43 +194,6 @@ s2_cell_token(
 Cell IDs are stored as hex strings (e.g., `"89c25901"`) rather than integers for
 maximum portability across systems.
 
-## A5 Cells
-
-Add [A5](https://a5geo.org/) spatial cell IDs based on geometry centroids.
-
-=== "CLI"
-
-    ```bash
-    gpio add a5 input.parquet output.parquet --resolution 15
-
-    # From HTTPS to S3
-    gpio add a5 https://example.com/data.parquet s3://bucket/indexed.parquet --resolution 15
-    ```
-
-=== "Python"
-
-    ```python
-    import geoparquet_io as gpio
-
-    gpio.read('input.parquet').add_a5(resolution=15).write('output.parquet')
-
-    # Custom column name
-    gpio.read('input.parquet').add_a5(column_name='a5_index', resolution=12).write('output.parquet')
-    ```
-
-**Options:**
-
-```bash
-# Custom column name
-gpio add a5 input.parquet output.parquet --a5-name a5_index
-
-# Different resolution
-gpio add a5 input.parquet output.parquet --resolution 12
-
-# With row group sizing
-gpio add a5 input.parquet output.parquet --row-group-size-mb 256MB
-```
-
 ## KD-Tree Partitions
 
 Add balanced spatial partition IDs using KD-tree:
