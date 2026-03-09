@@ -16,19 +16,23 @@ Every CLI command has a corresponding Python API exposed through two complementa
 
 1. **Method-based API** (`api/table.py`): A `Table` class that wraps a GeoParquet file and provides chainable methods. Created via `gpio.read("file.parquet")`, with methods like `.add_bbox()`, `.sort_hilbert()`, `.reproject()`.
 
-2. **Functional API** (`api/ops.py`): Standalone functions like `gpio.add_bbox(input, output)` that mirror CLI semantics -- take input/output paths and options as arguments.
+2. **Functional API** (`api/ops.py`): Standalone functions like `ops.add_bbox(table)` that operate on PyArrow tables, providing a lower-level interface for pipeline composition.
 
-Both APIs delegate to the same `core/` module functions (the `*_table()` functions from ADR-0001), ensuring behavioral parity with the CLI.
+Both APIs delegate to the same `core/` module functions (e.g., `add_bbox_table()`, `partition_by_quadkey()` from ADR-0001), ensuring behavioral parity with the CLI.
 
 ```python
 import geoparquet_io as gpio
+from geoparquet_io.api import ops
+import pyarrow.parquet as pq
 
-# Method-based (chainable)
+# Method-based (chainable, file-oriented)
 table = gpio.read("input.parquet")
 table.add_bbox().sort_hilbert().write("output.parquet")
 
-# Functional (mirrors CLI)
-gpio.add_bbox("input.parquet", "output.parquet")
+# Functional (operates on PyArrow tables)
+arrow_table = pq.read_table("input.parquet")
+arrow_table = ops.add_bbox(arrow_table)
+arrow_table = ops.sort_hilbert(arrow_table)
 ```
 
 When a new CLI command is added, a corresponding method must be added to `Table` and a corresponding function to `ops.py`. This is enforced through code review and documented in the contributor checklist.
@@ -38,7 +42,7 @@ When a new CLI command is added, a corresponding method must be added to `Table`
 ### Positive
 - Users get full functionality from Python without subprocess calls.
 - The `Table` class provides IDE autocomplete and method chaining for interactive use.
-- The functional API provides a familiar interface for users who think in terms of CLI commands.
+- The functional API in `ops.py` provides a table-centric interface for users composing PyArrow pipelines.
 - Behavioral parity is guaranteed since both APIs and the CLI share core implementations.
 
 ### Negative
@@ -47,7 +51,7 @@ When a new CLI command is added, a corresponding method must be added to `Table`
 - Parameter naming must be kept consistent between CLI options and API arguments.
 
 ### Neutral
-- The `Table` class currently has ~2400 lines, growing with each new operation. This is manageable since each method is self-contained.
+- The `Table` class in `api/table.py` currently has ~2300 lines, growing with each new operation. This is manageable since each method is self-contained.
 - Some operations (like partitioning) produce directory output rather than a single file, which fits the functional API better than the method-based API.
 
 ## Alternatives Considered
@@ -64,6 +68,9 @@ Providing only the method-based `Table` API. Rejected because some operations (b
 ## References
 
 - `geoparquet_io/api/table.py` -- `Table` class with method-based API
-- `geoparquet_io/api/ops.py` -- Functional API
+- `geoparquet_io/api/ops.py` -- Functional API (operates on PyArrow tables)
 - `geoparquet_io/api/__init__.py` -- Public API surface
+- `geoparquet_io/api/check.py` -- Validation API
+- `geoparquet_io/api/pipeline.py` -- Pipeline operations
+- `geoparquet_io/api/stac.py` -- STAC metadata API
 - ADR-0001 -- CLI/Core separation that enables this pattern

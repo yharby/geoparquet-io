@@ -12,12 +12,12 @@ As the project grew to include 50+ core modules and a comprehensive CLI surface,
 
 ## Decision
 
-CLI commands in `cli/main.py` are thin wrappers that handle argument parsing, user-facing output, and error presentation. All business logic lives in dedicated `core/` modules, where the primary entry point for each operation is a function following the `*_table()` naming convention (e.g., `add_bbox_table()`, `partition_quadkey_table()`).
+CLI commands in `cli/main.py` are thin wrappers that handle argument parsing, user-facing output, and error presentation. All business logic lives in dedicated `core/` modules, where each module exposes a primary entry-point function (e.g., `add_bbox_table()`, `partition_by_quadkey()`, `hilbert_order_table()`).
 
 The separation follows this pattern:
 
 1. **CLI layer** (`cli/main.py`): Defines Click commands and options, calls core functions, handles `ClickException` for user-facing errors.
-2. **Core layer** (`core/*.py`): Contains all data processing logic using DuckDB, PyArrow, and spatial operations. No dependency on Click.
+2. **Core layer** (`core/*.py`): Contains all data processing logic using DuckDB, PyArrow, and spatial operations. No dependency on Click. Functions follow naming conventions like `add_bbox_table()`, `partition_by_quadkey()`, `hilbert_order_table()`, etc.
 3. **API layer** (`api/table.py`, `api/ops.py`): Provides Pythonic interfaces that wrap core functions for programmatic use.
 
 ## Consequences

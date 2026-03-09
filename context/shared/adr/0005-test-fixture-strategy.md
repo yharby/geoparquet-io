@@ -21,7 +21,7 @@ Test data is organized into tiers based on size and usage:
 
 1. **Small fixtures in `tests/data/`** (committed to git, each file under 1MB): Pre-built Parquet, GeoPackage, GeoJSON, Shapefile, and CSV files that cover common scenarios. These include files with different CRS projections (EPSG:4326, EPSG:5070, EPSG:6933), compression codecs (Snappy, Zstd, Brotli), and geometry types. Both valid and deliberately malformed files are included for validation testing.
 
-2. **Generated fixtures via helper scripts**: `tests/data/create_csv_fixtures.py` and similar scripts generate test data programmatically when the fixture needs to represent specific edge cases or when binary files would be too large.
+2. **Generated fixtures via helper scripts**: `tests/data/create_csv_fixtures.py` and `tests/data/generate_test_fixtures.py` generate test data programmatically when the fixture needs to represent specific edge cases or when binary files would be too large.
 
 3. **Network-dependent fixtures** (marked `@pytest.mark.network`): Tests that fetch real-world data from remote sources. These are skipped in fast CI runs and used for integration testing.
 
@@ -54,9 +54,9 @@ uv run pytest -n auto
 - Maintaining both valid and invalid fixture variants requires discipline to keep them synchronized with format changes.
 
 ### Neutral
-- The `tests/data/` directory currently contains ~30 fixture files totaling approximately 5MB.
+- The `tests/data/` directory currently contains ~30 fixture files totaling approximately 1.5MB.
 - Some test modules create temporary fixtures in pytest's `tmp_path` for tests that modify data, ensuring test isolation.
-- Coverage requirement is 75% minimum (enforced), with an 80% target for new code.
+- Coverage requirement is 67% minimum (enforced via `--cov-fail-under=67`), with a higher target for new code.
 
 ## Alternatives Considered
 
@@ -72,5 +72,7 @@ Generating random test data with Hypothesis for fuzz testing. Not rejected but d
 ## References
 
 - `tests/data/` -- Committed test fixtures
+- `tests/data/create_csv_fixtures.py` -- CSV fixture generator
+- `tests/data/generate_test_fixtures.py` -- Parquet fixture generator
 - `tests/conftest.py` -- Shared pytest fixtures and configuration
 - `pyproject.toml` -- pytest markers configuration (`slow`, `network`)
