@@ -307,7 +307,7 @@ def validate_imports(content: str, project_root: Path) -> list[str]:
 
         # Parse the module AST to find exported names
         try:
-            source = module_file.read_text()
+            source = module_file.read_text(encoding="utf-8")
             tree = ast.parse(source)
         except (SyntaxError, OSError) as exc:
             errors.append(f"Could not parse {module_file}: {exc}")
@@ -436,7 +436,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: CLAUDE.md not found at {claude_md}")
         return 2
 
-    content = claude_md.read_text()
+    content = claude_md.read_text(encoding="utf-8")
     all_errors: list[str] = []
 
     # Run each validator
