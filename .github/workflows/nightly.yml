@@ -27,18 +27,30 @@ jobs:
 
       - name: Run mutation testing
         run: |
-          uv run mutmut run --no-progress --CI || true
+          # Allow mutmut to exit non-zero (exit code 2 = surviving mutants)
+          # but fail on actual errors (exit code 1 = crash)
+          EXIT_CODE=0
+          uv run mutmut run --no-progress --CI || EXIT_CODE=$?
+          if [ "$EXIT_CODE" -eq 1 ]; then
+            echo "::error::mutmut crashed during execution"
+            exit 1
+          fi
           uv run mutmut results
 
       - name: Check kill rate
         run: |
           # Extract stats from mutmut results
-          RESULTS=$(uv run mutmut results)
+          RESULTS=$(uv run mutmut results 2>&1)
           echo "$RESULTS"
 
-          # Parse killed and total counts
-          KILLED=$(echo "$RESULTS" | grep -oP 'Killed \K\d+' || echo "0")
-          SURVIVED=$(echo "$RESULTS" | grep -oP 'Survived \K\d+' || echo "0")
+          # Parse killed and survived counts using POSIX-compatible patterns
+          # mutmut 3.x outputs lines like "Killed: 42" or "Survived: 5"
+          KILLED=$(echo "$RESULTS" | sed -n 's/.*[Kk]illed[: ]*\([0-9]*\).*/\1/p' | head -1)
+          SURVIVED=$(echo "$RESULTS" | sed -n 's/.*[Ss]urvived[: ]*\([0-9]*\).*/\1/p' | head -1)
+
+          # Default to 0 if parsing fails
+          KILLED=${KILLED:-0}
+          SURVIVED=${SURVIVED:-0}
           TOTAL=$((KILLED + SURVIVED))
 
           if [ "$TOTAL" -gt 0 ]; then
@@ -52,7 +64,7 @@ jobs:
               # exit 1
             fi
           else
-            echo "No mutations generated"
+            echo "::warning::No mutations generated or could not parse mutmut output"
           fi
 
       - name: Upload mutation report

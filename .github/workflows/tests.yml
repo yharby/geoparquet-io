@@ -30,6 +30,9 @@ jobs:
       - name: Run linter
         run: uv run ruff check .
 
+      - name: Type check
+        run: uv run mypy geoparquet_io/
+
       - name: Check code complexity (informational)
         run: uv run xenon --max-absolute=E --max-modules=D --max-average=C geoparquet_io tests
         continue-on-error: true

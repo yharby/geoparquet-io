@@ -3,18 +3,56 @@
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
+
+import pytest
+import yaml
 
 if sys.version_info >= (3, 11):
     import tomllib
 else:
     import tomli as tomllib
 
+PROJECT_ROOT = Path(__file__).parent.parent
+
+
+@pytest.fixture()
+def pyproject_config() -> dict[str, Any]:
+    """Load and return parsed pyproject.toml."""
+    pyproject = PROJECT_ROOT / "pyproject.toml"
+    with open(pyproject, "rb") as f:
+        return tomllib.load(f)
+
+
+@pytest.fixture()
+def mutmut_config(pyproject_config: dict[str, Any]) -> dict[str, Any]:
+    """Return the [tool.mutmut] config section."""
+    assert "mutmut" in pyproject_config.get("tool", {}), "mutmut config missing from [tool.mutmut]"
+    return pyproject_config["tool"]["mutmut"]
+
+
+@pytest.fixture()
+def nightly_workflow() -> dict[str, Any]:
+    """Load and return parsed nightly workflow YAML."""
+    workflow_path = PROJECT_ROOT / ".github" / "workflows" / "nightly.yml"
+    assert workflow_path.exists(), "nightly.yml workflow missing"
+    with open(workflow_path) as f:
+        return yaml.safe_load(f)
+
+
+def _get_triggers(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Extract the triggers section from a workflow, handling PyYAML's 'on' -> True quirk."""
+    # PyYAML parses the YAML key 'on' as boolean True
+    triggers = workflow.get("on") if "on" in workflow else workflow.get(True)
+    assert triggers is not None, "Missing 'on' triggers section in workflow"
+    return triggers
+
 
 class TestMutmutConfig:
     """Test mutmut is properly configured."""
 
     def test_mutmut_installed(self):
-        """Verify mutmut is installed."""
+        """Verify mutmut is installed and reports a version."""
         result = subprocess.run(
             ["uv", "run", "mutmut", "--version"],
             capture_output=True,
@@ -22,56 +60,63 @@ class TestMutmutConfig:
             timeout=30,
         )
         assert result.returncode == 0
-        assert "mutmut" in result.stdout.lower()
+        # mutmut version output should contain the word "mutmut" or a version number
+        output = result.stdout.lower() + result.stderr.lower()
+        assert "mutmut" in output or any(c.isdigit() for c in output)
 
-    def test_mutmut_config_exists(self):
-        """Verify mutmut config in pyproject.toml."""
-        pyproject = Path(__file__).parent.parent / "pyproject.toml"
-        with open(pyproject, "rb") as f:
-            config = tomllib.load(f)
-
-        assert "mutmut" in config.get("tool", {}), "mutmut config missing from [tool.mutmut]"
-        mutmut_config = config["tool"]["mutmut"]
+    def test_mutmut_config_exists(self, mutmut_config: dict[str, Any]):
+        """Verify mutmut config has paths_to_mutate."""
         assert "paths_to_mutate" in mutmut_config
         assert "geoparquet_io" in mutmut_config["paths_to_mutate"]
 
-    def test_mutmut_paths_exist(self):
-        """Verify paths_to_mutate points to existing directory."""
-        pyproject = Path(__file__).parent.parent / "pyproject.toml"
-        with open(pyproject, "rb") as f:
-            config = tomllib.load(f)
-
-        paths = config["tool"]["mutmut"]["paths_to_mutate"]
-        project_root = pyproject.parent
+    def test_mutmut_paths_exist(self, mutmut_config: dict[str, Any]):
+        """Verify paths_to_mutate points to existing directories."""
+        paths = mutmut_config["paths_to_mutate"]
 
         # paths_to_mutate can be a string or list
         if isinstance(paths, str):
             paths = [paths]
 
         for path in paths:
-            full_path = project_root / path.rstrip("/")
+            full_path = PROJECT_ROOT / path.rstrip("/")
             assert full_path.exists(), f"Mutation path does not exist: {path}"
+            assert full_path.is_dir(), f"Mutation path is not a directory: {path}"
 
-    def test_mutmut_tests_dir_exists(self):
+    def test_mutmut_tests_dir_exists(self, mutmut_config: dict[str, Any]):
         """Verify tests_dir points to existing directory."""
-        pyproject = Path(__file__).parent.parent / "pyproject.toml"
-        with open(pyproject, "rb") as f:
-            config = tomllib.load(f)
-
-        tests_dir = config["tool"]["mutmut"].get("tests_dir", "tests/")
-        project_root = pyproject.parent
-        full_path = project_root / tests_dir.rstrip("/")
+        tests_dir = mutmut_config.get("tests_dir", "tests/")
+        full_path = PROJECT_ROOT / tests_dir.rstrip("/")
         assert full_path.exists(), f"Tests directory does not exist: {tests_dir}"
+        assert full_path.is_dir(), f"Tests path is not a directory: {tests_dir}"
 
-    def test_mutmut_dev_dependency(self):
+    def test_mutmut_runner_uses_pytest(self, mutmut_config: dict[str, Any]):
+        """Verify runner config uses pytest."""
+        runner = mutmut_config.get("runner", "")
+        assert "pytest" in runner, "mutmut runner should use pytest"
+
+    def test_mutmut_dev_dependency(self, pyproject_config: dict[str, Any]):
         """Verify mutmut is in dev optional-dependencies."""
-        pyproject = Path(__file__).parent.parent / "pyproject.toml"
-        with open(pyproject, "rb") as f:
-            config = tomllib.load(f)
-
-        dev_deps = config.get("project", {}).get("optional-dependencies", {}).get("dev", [])
+        dev_deps = (
+            pyproject_config.get("project", {}).get("optional-dependencies", {}).get("dev", [])
+        )
         has_mutmut = any("mutmut" in dep for dep in dev_deps)
         assert has_mutmut, "mutmut not found in [project.optional-dependencies] dev"
+
+    def test_pyyaml_dev_dependency(self, pyproject_config: dict[str, Any]):
+        """Verify pyyaml is in dev dependencies (needed for workflow tests)."""
+        dev_deps = (
+            pyproject_config.get("project", {}).get("optional-dependencies", {}).get("dev", [])
+        )
+        has_pyyaml = any("pyyaml" in dep.lower() for dep in dev_deps)
+        assert has_pyyaml, "pyyaml not found in [project.optional-dependencies] dev"
+
+    def test_tomli_dev_dependency(self, pyproject_config: dict[str, Any]):
+        """Verify tomli is in dev dependencies (Python 3.10 compat)."""
+        dev_deps = (
+            pyproject_config.get("project", {}).get("optional-dependencies", {}).get("dev", [])
+        )
+        has_tomli = any("tomli" in dep for dep in dev_deps)
+        assert has_tomli, "tomli not found in [project.optional-dependencies] dev"
 
 
 class TestNightlyWorkflow:
@@ -79,57 +124,60 @@ class TestNightlyWorkflow:
 
     def test_nightly_workflow_exists(self):
         """Verify nightly workflow file exists."""
-        workflow = Path(__file__).parent.parent / ".github/workflows/nightly.yml"
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "nightly.yml"
         assert workflow.exists(), "nightly.yml workflow missing"
 
-    def test_nightly_workflow_valid_yaml(self):
-        """Verify nightly workflow is valid YAML."""
-        import yaml
+    def test_nightly_workflow_valid_yaml(self, nightly_workflow: dict[str, Any]):
+        """Verify nightly workflow is valid YAML with required top-level keys."""
+        _get_triggers(nightly_workflow)
+        assert "jobs" in nightly_workflow
+        assert "mutation" in nightly_workflow["jobs"]
 
-        workflow = Path(__file__).parent.parent / ".github/workflows/nightly.yml"
-        with open(workflow) as f:
-            config = yaml.safe_load(f)
-
-        # PyYAML parses 'on' as True (YAML boolean) - check either key
-        triggers = config.get("on", config.get(True))
-        assert triggers is not None, "Missing 'on' triggers section"
-        assert "jobs" in config
-        assert "mutation" in config["jobs"]
-
-    def test_nightly_has_schedule_trigger(self):
+    def test_nightly_has_schedule_trigger(self, nightly_workflow: dict[str, Any]):
         """Verify nightly workflow has schedule trigger."""
-        import yaml
-
-        workflow = Path(__file__).parent.parent / ".github/workflows/nightly.yml"
-        with open(workflow) as f:
-            config = yaml.safe_load(f)
-
-        # PyYAML parses 'on' as True (YAML boolean)
-        triggers = config.get("on", config.get(True))
-        assert triggers is not None, "Missing 'on' triggers section"
+        triggers = _get_triggers(nightly_workflow)
         assert "schedule" in triggers, "Missing schedule trigger"
+        # Verify schedule has at least one cron entry
+        schedules = triggers["schedule"]
+        assert isinstance(schedules, list), "schedule should be a list"
+        assert len(schedules) > 0, "schedule should have at least one cron entry"
+        assert "cron" in schedules[0], "schedule entry should have a cron field"
 
-    def test_nightly_has_manual_trigger(self):
+    def test_nightly_has_manual_trigger(self, nightly_workflow: dict[str, Any]):
         """Verify nightly workflow can be triggered manually."""
-        import yaml
+        triggers = _get_triggers(nightly_workflow)
+        assert "workflow_dispatch" in triggers, "Missing manual trigger (workflow_dispatch)"
 
-        workflow = Path(__file__).parent.parent / ".github/workflows/nightly.yml"
-        with open(workflow) as f:
-            config = yaml.safe_load(f)
-
-        # PyYAML parses 'on' as True (YAML boolean)
-        triggers = config.get("on", config.get(True))
-        assert triggers is not None, "Missing 'on' triggers section"
-        assert "workflow_dispatch" in triggers, "Missing manual trigger"
-
-    def test_nightly_mutation_job_has_timeout(self):
-        """Verify mutation job has a timeout set."""
-        import yaml
-
-        workflow = Path(__file__).parent.parent / ".github/workflows/nightly.yml"
-        with open(workflow) as f:
-            config = yaml.safe_load(f)
-
-        mutation_job = config["jobs"]["mutation"]
+    def test_nightly_mutation_job_has_timeout(self, nightly_workflow: dict[str, Any]):
+        """Verify mutation job has a reasonable timeout set."""
+        mutation_job = nightly_workflow["jobs"]["mutation"]
         assert "timeout-minutes" in mutation_job, "Missing timeout-minutes on mutation job"
-        assert mutation_job["timeout-minutes"] >= 60, "Timeout should be at least 60 minutes"
+        timeout = mutation_job["timeout-minutes"]
+        assert timeout >= 60, f"Timeout {timeout}m too short; should be >= 60 minutes"
+        assert timeout <= 360, f"Timeout {timeout}m unreasonably large; should be <= 360 minutes"
+
+    def test_nightly_mutation_job_runs_on(self, nightly_workflow: dict[str, Any]):
+        """Verify mutation job specifies a runner."""
+        mutation_job = nightly_workflow["jobs"]["mutation"]
+        assert "runs-on" in mutation_job, "Missing runs-on in mutation job"
+
+    def test_nightly_mutation_job_has_steps(self, nightly_workflow: dict[str, Any]):
+        """Verify mutation job has steps defined."""
+        mutation_job = nightly_workflow["jobs"]["mutation"]
+        assert "steps" in mutation_job, "Missing steps in mutation job"
+        steps = mutation_job["steps"]
+        assert len(steps) > 0, "Mutation job should have at least one step"
+
+        # Verify essential steps exist by checking for key actions/commands
+        step_contents = " ".join(
+            str(step.get("run", "")) + str(step.get("uses", "")) for step in steps
+        )
+        assert "checkout" in step_contents, "Missing checkout step"
+        assert "mutmut" in step_contents, "Missing mutmut run step"
+
+    def test_nightly_has_artifact_upload(self, nightly_workflow: dict[str, Any]):
+        """Verify mutation report artifact is uploaded."""
+        mutation_job = nightly_workflow["jobs"]["mutation"]
+        steps = mutation_job["steps"]
+        upload_steps = [s for s in steps if "upload-artifact" in str(s.get("uses", ""))]
+        assert len(upload_steps) > 0, "Missing artifact upload step"
