@@ -70,6 +70,8 @@ dev = [
     "xenon>=0.9.3",
     "codespell>=2.2",
     "import-linter>=2.0",
+    "bandit>=1.7",
+    "pip-audit>=2.7",
 ]
 docs = [
     "mkdocs>=1.5.0",
@@ -204,6 +206,23 @@ module = [
     "geoparquet_io.core.write_strategies.duckdb_kv",
 ]
 ignore_errors = true
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "docs"]
+skips = [
+    "B608",  # SQL injection false positives: DuckDB is an embedded OLAP database;
+             # all SQL queries use internally-derived column names (from schema detection),
+             # not untrusted user input. Parameterised queries are not supported for
+             # column/table identifiers in DuckDB's Python API.
+    "B110",  # try/except/pass: all instances are intentional (race-condition guards for
+             # DuckDB extension installation, optional cleanup, optional metadata ops).
+    "B112",  # try/except/continue: intentional in iteration over optional schema columns.
+    "B404",  # subprocess import: used only in the benchmark module to call ogr2ogr.
+    "B603",  # subprocess without shell=True: ogr2ogr call in benchmark with a fixed argv list.
+    "B607",  # partial executable path: ogr2ogr relies on PATH, which is standard practice.
+    "B105",  # hardcoded password: false positive on an ArcGIS token endpoint URL constant.
+    "B101",  # assert used: single internal logic guard (assert overall_bounds is not None).
+]
 
 [tool.vulture]
 min_confidence = 80
