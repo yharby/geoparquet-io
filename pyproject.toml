@@ -68,6 +68,7 @@ dev = [
     "vulture>=2.14",
     "radon>=6.0.1",
     "xenon>=0.9.3",
+    "codespell>=2.2",
 ]
 docs = [
     "mkdocs>=1.5.0",
@@ -208,6 +209,11 @@ min_confidence = 80
 paths = ["geoparquet_io", "tests"]
 sort_by_size = true
 verbose = false
+
+[tool.codespell]
+skip = ".git,*.lock,*.parquet,*.json,tests/data/*,.venv,uv.lock"
+ignore-words-list = "nd,ot,crs,inout"
+check-filenames = true
 
 [tool.coverage.run]
 source = ["geoparquet_io"]
