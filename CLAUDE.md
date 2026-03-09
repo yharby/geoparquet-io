@@ -72,6 +72,7 @@ geoparquet_io/
     └── stac.py          # STAC metadata API
 ```
 
+<!-- freshness: last-verified: 2026-03-09, maps-to: geoparquet_io/cli/main.py -->
 ### CLI Command Groups
 
 ```bash
@@ -86,6 +87,7 @@ gpio check         # Validate best practices
 gpio benchmark     # Performance testing
 ```
 
+<!-- freshness: last-verified: 2026-03-09, maps-to: geoparquet_io/core/common.py, geoparquet_io/cli/decorators.py -->
 ### Key Patterns
 
 1. **CLI/Core Separation**: CLI commands are thin wrappers; business logic in `core/`
@@ -101,6 +103,7 @@ gpio benchmark     # Performance testing
 
 ---
 
+<!-- freshness: last-verified: 2026-03-09, maps-to: geoparquet_io/core/common.py -->
 ## Dependencies Quick Reference
 
 ```python
@@ -117,6 +120,7 @@ from geoparquet_io.core.common import is_remote_url, remote_write_context, setup
 
 ---
 
+<!-- freshness: last-verified: 2026-03-09, maps-to: pyproject.toml -->
 ## Testing with uv
 
 ```bash

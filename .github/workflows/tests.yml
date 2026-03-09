@@ -41,6 +41,10 @@ jobs:
         run: uv run vulture
         continue-on-error: true
 
+      - name: Check freshness markers
+        run: uv run python scripts/update_freshness.py --check --warn-days 30
+        continue-on-error: true
+
   test:
     runs-on: ${{ matrix.os }}
     strategy:

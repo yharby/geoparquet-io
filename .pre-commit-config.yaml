@@ -118,6 +118,14 @@ repos:
       pass_filenames: false
       stages: [push]
 
+    - id: update-freshness
+      name: update-freshness
+      description: Update CLAUDE.md freshness markers when mapped files change
+      entry: uv run python scripts/update_freshness.py --update
+      language: system
+      files: ^(geoparquet_io/cli/main\.py|geoparquet_io/core/common\.py|geoparquet_io/cli/decorators\.py|pyproject\.toml)$
+      pass_filenames: false
+
     - id: sync-dependencies
       name: sync-dependencies
       description: Auto-sync dependencies when pyproject.toml changes
