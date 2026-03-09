@@ -87,6 +87,14 @@ repos:
       pass_filenames: false
       always_run: true
 
+    - id: validate-claude-md
+      name: validate-claude-md
+      description: Validate CLAUDE.md against the actual codebase
+      entry: uv run python scripts/validate_claude_md.py
+      language: system
+      files: ^(CLAUDE\.md|geoparquet_io/cli/main\.py|pyproject\.toml)$
+      pass_filenames: false
+
     - id: check-commit-msg
       name: check-commit-msg
       description: Enforce imperative mood in commit messages
