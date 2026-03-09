@@ -149,7 +149,7 @@ def get_core_modules(core_path: Path) -> list[dict]:
     for py_file in sorted(core_path.glob("*.py")):
         if py_file.name.startswith("_"):
             continue
-        content = py_file.read_text()
+        content = py_file.read_text(encoding="utf-8")
         line_count = len(content.splitlines())
         docstring = _extract_module_docstring(content)
         modules.append(
@@ -242,7 +242,7 @@ def main() -> int:
         print(f"ERROR: core directory not found at {core_path}")
         return 2
 
-    original = claude_md.read_text()
+    original = claude_md.read_text(encoding="utf-8")
     updated = original
 
     # Generate each section
@@ -260,7 +260,7 @@ def main() -> int:
         return 0
 
     if args.update:
-        claude_md.write_text(updated)
+        claude_md.write_text(updated, encoding="utf-8")
         print("CLAUDE.md updated successfully!")
         return 0
     elif args.check:

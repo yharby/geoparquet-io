@@ -384,7 +384,7 @@ class TestUpdateMode:
     def test_claude_md_has_generated_markers(self):
         """Test that CLAUDE.md contains the generated section markers."""
         claude_md = PROJECT_ROOT / "CLAUDE.md"
-        content = claude_md.read_text()
+        content = claude_md.read_text(encoding="utf-8")
         for section_name in ["cli-commands", "test-markers", "core-modules"]:
             assert f"<!-- BEGIN GENERATED: {section_name} -->" in content, (
                 f"CLAUDE.md missing BEGIN marker for '{section_name}'"
@@ -396,7 +396,7 @@ class TestUpdateMode:
     def test_update_produces_valid_markdown(self):
         """Test that updated CLAUDE.md still has valid structure."""
         claude_md = PROJECT_ROOT / "CLAUDE.md"
-        content = claude_md.read_text()
+        content = claude_md.read_text(encoding="utf-8")
 
         # Generate all sections and apply
         sections = {
@@ -421,7 +421,7 @@ class TestUpdateMode:
     def test_update_is_idempotent(self):
         """Test that running update twice produces identical output."""
         claude_md = PROJECT_ROOT / "CLAUDE.md"
-        content = claude_md.read_text()
+        content = claude_md.read_text(encoding="utf-8")
 
         sections = {
             "cli-commands": self.mod.generate_cli_section(),
@@ -456,22 +456,22 @@ class TestUpdateMode:
         # Copy CLAUDE.md to a temp location
         claude_md = PROJECT_ROOT / "CLAUDE.md"
         fake_md = tmp_path / "CLAUDE.md"
-        fake_md.write_text(claude_md.read_text())
+        fake_md.write_text(claude_md.read_text(encoding="utf-8"), encoding="utf-8")
 
         # Corrupt a section to force an update
-        content = fake_md.read_text()
+        content = fake_md.read_text(encoding="utf-8")
         content = content.replace(
             "### CLI Command Groups",
             "### CLI Command Groups (OUTDATED)",
         )
-        fake_md.write_text(content)
+        fake_md.write_text(content, encoding="utf-8")
 
         # Create the required directory structure
         (tmp_path / "geoparquet_io" / "core").mkdir(parents=True, exist_ok=True)
         (tmp_path / "scripts").mkdir(exist_ok=True)
 
         # The script needs a specific project root -- we test via the module API
-        original = fake_md.read_text()
+        original = fake_md.read_text(encoding="utf-8")
         sections = {
             "cli-commands": self.mod.generate_cli_section(),
             "test-markers": self.mod.generate_markers_section(PROJECT_ROOT / "pyproject.toml"),
@@ -484,6 +484,6 @@ class TestUpdateMode:
         for name, section_content in sections.items():
             updated = self.mod.update_section(updated, name, section_content)
 
-        fake_md.write_text(updated)
-        assert "OUTDATED" not in fake_md.read_text()
-        assert "### CLI Command Groups" in fake_md.read_text()
+        fake_md.write_text(updated, encoding="utf-8")
+        assert "OUTDATED" not in fake_md.read_text(encoding="utf-8")
+        assert "### CLI Command Groups" in fake_md.read_text(encoding="utf-8")
