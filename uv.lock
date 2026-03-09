@@ -1048,6 +1048,7 @@ dev = [
     { name = "pytest-xdist" },
     { name = "radon" },
     { name = "ruff" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "vulture" },
     { name = "xenon" },
 ]
@@ -1096,6 +1097,7 @@ requires-dist = [
     { name = "rich", specifier = ">=13.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.0" },
     { name = "s3fs", specifier = ">=2023.9.0" },
+    { name = "tomli", marker = "python_full_version < '3.11' and extra == 'dev'", specifier = ">=2.0.0" },
     { name = "vulture", marker = "extra == 'dev'", specifier = ">=2.14" },
     { name = "xenon", marker = "extra == 'dev'", specifier = ">=0.9.3" },
 ]
