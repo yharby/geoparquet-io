@@ -1,50 +1,103 @@
-"""Tests for import-linter architecture contracts."""
+"""Tests for import-linter architecture contracts.
+
+Tests are split into two categories:
+- Unit tests that verify configuration via the Python API (fast, contribute to coverage)
+- Integration tests that run lint-imports as a subprocess (slow, marked accordingly)
+"""
+
+from __future__ import annotations
 
 import subprocess
 
+import pytest
+from importlinter import api as importlinter_api
 
-class TestImportLinterContracts:
-    """Test that import-linter is configured and passing."""
 
-    def test_lint_imports_command_exists(self):
-        """Verify lint-imports command is available."""
-        result = subprocess.run(
-            ["uv", "run", "lint-imports", "--help"],
-            capture_output=True,
-            text=True,
+class TestImportLinterConfiguration:
+    """Unit tests: verify import-linter contracts are correctly configured."""
+
+    @pytest.fixture()
+    def config(self):
+        """Load import-linter configuration from pyproject.toml."""
+        return importlinter_api.read_configuration()
+
+    def test_root_package_is_geoparquet_io(self, config):
+        """Verify root_package is set to geoparquet_io."""
+        session_options = config["session_options"]
+        assert session_options["root_packages"] == ["geoparquet_io"]
+
+    def test_include_external_packages_enabled(self, config):
+        """External packages must be included to catch click imports."""
+        session_options = config["session_options"]
+        assert session_options.get("include_external_packages") == "True"
+
+    def test_has_two_contracts(self, config):
+        """Exactly two architecture contracts should be defined."""
+        contracts_options = config["contracts_options"]
+        assert len(contracts_options) == 2, (
+            f"Expected 2 contracts, found {len(contracts_options)}: "
+            f"{[c.get('name', c.get('id', '?')) for c in contracts_options]}"
         )
-        assert result.returncode == 0
-        assert "lint-imports" in result.stdout or "Usage" in result.stdout
+
+    def test_core_no_click_contract_configured(self, config):
+        """Verify core-no-click contract is correctly configured."""
+        contracts = {c["id"]: c for c in config["contracts_options"]}
+        assert "core-no-click" in contracts, "Missing core-no-click contract"
+
+        contract = contracts["core-no-click"]
+        assert contract["type"] == "forbidden"
+        assert "geoparquet_io.core" in contract["source_modules"]
+        assert "click" in contract["forbidden_modules"]
+
+    def test_api_no_cli_contract_configured(self, config):
+        """Verify api-no-cli contract is correctly configured."""
+        contracts = {c["id"]: c for c in config["contracts_options"]}
+        assert "api-no-cli" in contracts, "Missing api-no-cli contract"
+
+        contract = contracts["api-no-cli"]
+        assert contract["type"] == "forbidden"
+        assert "geoparquet_io.api" in contract["source_modules"]
+        assert "geoparquet_io.cli" in contract["forbidden_modules"]
+
+    def test_core_no_click_has_ignore_imports(self, config):
+        """Existing violations must be tracked in ignore_imports."""
+        contracts = {c["id"]: c for c in config["contracts_options"]}
+        contract = contracts["core-no-click"]
+        ignore_imports = contract.get("ignore_imports", [])
+        assert len(ignore_imports) > 0, (
+            "core-no-click should have ignore_imports for existing violations"
+        )
+        # Verify the wildcard pattern for existing core -> click violations
+        assert any("geoparquet_io.core.*" in imp and "click" in imp for imp in ignore_imports), (
+            "Expected wildcard ignore for geoparquet_io.core.* -> click"
+        )
+
+    def test_api_no_cli_has_no_ignore_imports(self, config):
+        """api-no-cli should have no ignored violations (clean contract)."""
+        contracts = {c["id"]: c for c in config["contracts_options"]}
+        contract = contracts["api-no-cli"]
+        ignore_imports = contract.get("ignore_imports", [])
+        assert len(ignore_imports) == 0, (
+            f"api-no-cli should not need any ignore_imports, found: {ignore_imports}"
+        )
+
+
+@pytest.mark.slow
+class TestImportLinterIntegration:
+    """Integration tests: run lint-imports subprocess to verify contracts pass."""
+
+    _SUBPROCESS_TIMEOUT = 120  # seconds
 
     def test_all_contracts_pass(self):
-        """Verify all import-linter contracts pass."""
+        """Verify all import-linter contracts pass (runs lint-imports)."""
         result = subprocess.run(
             ["uv", "run", "lint-imports"],
             capture_output=True,
             text=True,
+            timeout=self._SUBPROCESS_TIMEOUT,
         )
         assert result.returncode == 0, f"Import contracts failed:\n{result.stdout}\n{result.stderr}"
-
-    def test_core_does_not_import_click(self):
-        """Integration test: verify core modules don't import click (new violations).
-
-        Note: Existing violations are tracked in pyproject.toml under
-        [tool.importlinter.contracts] ignore_imports. New core code must not
-        import click directly. Contract ID: core-no-click.
-        """
-        result = subprocess.run(
-            ["uv", "run", "lint-imports", "--contract", "core-no-click"],
-            capture_output=True,
-            text=True,
-        )
-        # lint-imports returns 0 if contract passes
-        assert result.returncode == 0, f"Core imports Click:\n{result.stdout}"
-
-    def test_api_does_not_import_cli(self):
-        """Verify API modules do not import CLI modules. Contract ID: api-no-cli."""
-        result = subprocess.run(
-            ["uv", "run", "lint-imports", "--contract", "api-no-cli"],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0, f"API imports CLI:\n{result.stdout}"
+        assert "KEPT" in result.stdout
+        # The summary line always contains "0 broken" on success;
+        # a real failure says "N broken" where N > 0 and also "BROKEN" on individual lines.
+        assert "BROKEN" not in result.stdout

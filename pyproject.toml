@@ -251,6 +251,8 @@ ignore_imports = [
     "geoparquet_io.core.* -> click",
     "geoparquet_io.core.benchmark_suite -> geoparquet_io",
 ]
+# Alert when ignored patterns no longer match any actual imports (stale ignores)
+unmatched_ignore_imports_alerting = "warn"
 
 [[tool.importlinter.contracts]]
 id = "api-no-cli"
