@@ -6,36 +6,75 @@ from pathlib import Path
 import pytest
 import tomllib
 
+# Timeout for security tool subprocess calls (seconds).
+_SUBPROCESS_TIMEOUT = 120
 
-class TestSecurityScanning:
-    """Test that security tools are configured and passing."""
+# Root of the project, resolved relative to this test file so the tests
+# work regardless of pytest's working directory.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PYPROJECT = _PROJECT_ROOT / "pyproject.toml"
+
+# Maximum number of bandit skips allowed.  A generous upper bound that
+# prevents the skip list from growing unchecked (which would silently
+# defeat the purpose of running bandit at all).
+_MAX_BANDIT_SKIPS = 15
+
+
+def _load_pyproject() -> dict:
+    """Load and return the parsed pyproject.toml."""
+    with open(_PYPROJECT, "rb") as f:
+        return tomllib.load(f)
+
+
+class TestSecurityToolAvailability:
+    """Verify that security tools are installed and runnable."""
 
     def test_bandit_command_exists(self):
-        """Verify bandit command is available."""
+        """Verify bandit is installed and reports its version."""
         result = subprocess.run(
             ["uv", "run", "bandit", "--version"],
             capture_output=True,
             text=True,
+            timeout=_SUBPROCESS_TIMEOUT,
+            cwd=_PROJECT_ROOT,
         )
-        assert result.returncode == 0
-
-    def test_bandit_passes(self):
-        """Verify bandit security scan passes."""
-        result = subprocess.run(
-            ["uv", "run", "bandit", "-r", "geoparquet_io/", "-c", "pyproject.toml"],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0, f"Bandit found issues:\n{result.stdout}\n{result.stderr}"
+        assert result.returncode == 0, f"bandit --version failed:\n{result.stderr}"
 
     def test_pip_audit_command_exists(self):
-        """Verify pip-audit command is available."""
+        """Verify pip-audit is installed and reports its version."""
         result = subprocess.run(
             ["uv", "run", "pip-audit", "--version"],
             capture_output=True,
             text=True,
+            timeout=_SUBPROCESS_TIMEOUT,
+            cwd=_PROJECT_ROOT,
         )
-        assert result.returncode == 0
+        assert result.returncode == 0, f"pip-audit --version failed:\n{result.stderr}"
+
+
+class TestSecurityScanResults:
+    """Run actual security scans and assert they pass."""
+
+    def test_bandit_passes(self):
+        """Verify bandit security scan passes with zero findings."""
+        result = subprocess.run(
+            [
+                "uv",
+                "run",
+                "bandit",
+                "-r",
+                "geoparquet_io/",
+                "-c",
+                "pyproject.toml",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_SUBPROCESS_TIMEOUT,
+            cwd=_PROJECT_ROOT,
+        )
+        assert result.returncode == 0, (
+            f"Bandit found security issues:\n{result.stdout}\n{result.stderr}"
+        )
 
     @pytest.mark.network
     def test_pip_audit_passes(self):
@@ -44,36 +83,75 @@ class TestSecurityScanning:
             ["uv", "run", "pip-audit"],
             capture_output=True,
             text=True,
+            timeout=_SUBPROCESS_TIMEOUT,
+            cwd=_PROJECT_ROOT,
         )
-        assert result.returncode == 0, f"Vulnerabilities found:\n{result.stdout}\n{result.stderr}"
+        assert result.returncode == 0, (
+            f"pip-audit found vulnerabilities:\n{result.stdout}\n{result.stderr}"
+        )
 
-    def test_bandit_config_in_pyproject(self):
-        """Verify bandit configuration exists in pyproject.toml."""
-        pyproject = Path("pyproject.toml")
-        with open(pyproject, "rb") as f:
-            config = tomllib.load(f)
 
-        assert "bandit" in config.get("tool", {}), "bandit config missing from pyproject.toml"
+class TestBanditConfiguration:
+    """Validate bandit configuration in pyproject.toml."""
 
-    def test_bandit_config_has_exclude_dirs(self):
-        """Verify bandit config excludes test and venv directories."""
-        pyproject = Path("pyproject.toml")
-        with open(pyproject, "rb") as f:
-            config = tomllib.load(f)
+    def test_bandit_config_exists(self):
+        """Verify [tool.bandit] section is present."""
+        config = _load_pyproject()
+        assert "bandit" in config.get("tool", {}), "Missing [tool.bandit] section in pyproject.toml"
 
-        bandit_config = config["tool"]["bandit"]
-        assert "exclude_dirs" in bandit_config, "bandit config missing exclude_dirs"
-        exclude_dirs = bandit_config["exclude_dirs"]
+    def test_exclude_dirs_includes_tests(self):
+        """Verify bandit excludes the tests directory."""
+        config = _load_pyproject()
+        exclude_dirs = config["tool"]["bandit"].get("exclude_dirs", [])
         assert "tests" in exclude_dirs, "tests dir not excluded from bandit scan"
+
+    def test_exclude_dirs_includes_venv(self):
+        """Verify bandit excludes the .venv directory."""
+        config = _load_pyproject()
+        exclude_dirs = config["tool"]["bandit"].get("exclude_dirs", [])
         assert ".venv" in exclude_dirs, ".venv dir not excluded from bandit scan"
 
-    def test_bandit_and_pip_audit_in_dev_deps(self):
-        """Verify bandit and pip-audit are listed as dev dependencies."""
-        pyproject = Path("pyproject.toml")
-        with open(pyproject, "rb") as f:
-            config = tomllib.load(f)
+    def test_skips_list_is_bounded(self):
+        """Guard against unbounded growth of the bandit skip list.
 
+        Each skip weakens the security scan, so we enforce an upper limit.
+        If you legitimately need to raise the cap, update _MAX_BANDIT_SKIPS
+        and add a comment explaining why.
+        """
+        config = _load_pyproject()
+        skips = config["tool"]["bandit"].get("skips", [])
+        assert len(skips) <= _MAX_BANDIT_SKIPS, (
+            f"Bandit skip list has {len(skips)} entries (max {_MAX_BANDIT_SKIPS}). "
+            f"Review whether all skips are still necessary before raising the limit."
+        )
+
+    def test_every_skip_has_valid_id_format(self):
+        """Verify each skip is a valid bandit test ID (e.g., B101, B608)."""
+        config = _load_pyproject()
+        skips = config["tool"]["bandit"].get("skips", [])
+        for skip in skips:
+            assert skip.startswith("B") and skip[1:].isdigit(), (
+                f"Invalid bandit skip ID: {skip!r}. Expected format: B<digits>"
+            )
+
+
+class TestDevDependencies:
+    """Verify security tools are declared as dev dependencies."""
+
+    def test_bandit_in_dev_deps(self):
+        """Verify bandit is listed in [project.optional-dependencies.dev]."""
+        config = _load_pyproject()
         dev_deps = config.get("project", {}).get("optional-dependencies", {}).get("dev", [])
-        dep_names = [dep.split(">=")[0].split("==")[0].strip().lower() for dep in dev_deps]
+        dep_names = [
+            d.split(">=")[0].split("==")[0].split("<")[0].strip().lower() for d in dev_deps
+        ]
         assert "bandit" in dep_names, "bandit not found in dev extras"
+
+    def test_pip_audit_in_dev_deps(self):
+        """Verify pip-audit is listed in [project.optional-dependencies.dev]."""
+        config = _load_pyproject()
+        dev_deps = config.get("project", {}).get("optional-dependencies", {}).get("dev", [])
+        dep_names = [
+            d.split(">=")[0].split("==")[0].split("<")[0].strip().lower() for d in dev_deps
+        ]
         assert "pip-audit" in dep_names, "pip-audit not found in dev extras"
