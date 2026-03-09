@@ -88,13 +88,29 @@ def extract_file_paths(content: str) -> set[str]:
     return paths
 
 
+_BUILTIN_PYTEST_MARKERS = frozenset(
+    {
+        "parametrize",
+        "skip",
+        "skipif",
+        "xfail",
+        "usefixtures",
+        "filterwarnings",
+        "timeout",
+    }
+)
+
+
 def extract_test_markers(content: str) -> set[str]:
     """Extract pytest marker names referenced in *content*.
 
     We look for:
       - ``@pytest.mark.<name>``
       - ``-m "not <name> and not <name2>"``  (words after ``not``)
-      - ``-m "<name> or <name2>"``
+      - ``-m '<name> or <name2>'``
+
+    Built-in pytest markers (``parametrize``, ``skip``, ``xfail``, etc.)
+    are excluded since they do not need to be declared in ``pyproject.toml``.
     """
     markers: set[str] = set()
 
@@ -102,13 +118,16 @@ def extract_test_markers(content: str) -> set[str]:
     for m in re.finditer(r"@pytest\.mark\.(\w+)", content):
         markers.add(m.group(1))
 
-    # Pattern 2: -m "..." flag contents
-    for m in re.finditer(r'-m\s+"([^"]+)"', content):
+    # Pattern 2: -m "..." or -m '...' flag contents
+    for m in re.finditer(r"""-m\s+["']([^"']+)["']""", content):
         expr = m.group(1)
         # Extract bare words that aren't boolean operators
         for word in re.findall(r"\b(\w+)\b", expr):
             if word not in ("not", "and", "or"):
                 markers.add(word)
+
+    # Remove built-in pytest markers that don't need pyproject.toml definitions
+    markers -= _BUILTIN_PYTEST_MARKERS
 
     return markers
 
@@ -116,24 +135,55 @@ def extract_test_markers(content: str) -> set[str]:
 def extract_imports(content: str) -> list[tuple[str, list[str]]]:
     """Extract ``from X import Y, Z`` statements from *content*.
 
-    Only matches imports from ``geoparquet_io.*`` modules.
+    Only matches imports from ``geoparquet_io.*`` modules.  Handles both
+    single-line imports and multi-line parenthesized imports, as well as
+    ``as`` aliases.
 
     Returns a list of ``(module_path, [name1, name2, ...])`` tuples.
     """
     imports: list[tuple[str, list[str]]] = []
 
-    pattern = r"from\s+(geoparquet_io\.\S+)\s+import\s+([^\n]+)"
-    for m in re.finditer(pattern, content):
+    # Pattern 1: multi-line parenthesized imports
+    #   from geoparquet_io.foo import (
+    #       bar,
+    #       baz,
+    #   )
+    paren_pattern = r"from\s+(geoparquet_io\.\S+)\s+import\s+\(([^)]+)\)"
+    for m in re.finditer(paren_pattern, content, re.DOTALL):
         module = m.group(1)
-        names_str = m.group(2).strip()
-        # Handle multi-name imports like ``a, b, c``
-        names = [n.strip().rstrip(",") for n in names_str.split(",")]
-        # Filter out empty strings and comments
-        names = [n for n in names if n and not n.startswith("#")]
+        names = _parse_import_names(m.group(2))
+        if names:
+            imports.append((module, names))
+
+    # Pattern 2: single-line imports
+    #   from geoparquet_io.foo import bar, baz
+    single_pattern = r"from\s+(geoparquet_io\.\S+)\s+import\s+(?!\()([^\n]+)"
+    for m in re.finditer(single_pattern, content):
+        module = m.group(1)
+        names = _parse_import_names(m.group(2))
         if names:
             imports.append((module, names))
 
     return imports
+
+
+def _parse_import_names(names_str: str) -> list[str]:
+    """Parse import names from a comma-separated string.
+
+    Handles ``as`` aliases by extracting only the original name, and
+    filters out empty strings, comments, and parentheses.
+    """
+    names: list[str] = []
+    for part in names_str.split(","):
+        part = part.strip().rstrip(",")
+        if not part or part.startswith("#") or part in ("(", ")"):
+            continue
+        # Handle ``name as alias`` -- validate the original name
+        if " as " in part:
+            part = part.split(" as ")[0].strip()
+        if part:
+            names.append(part)
+    return names
 
 
 # ---------------------------------------------------------------------------
@@ -276,32 +326,47 @@ def validate_imports(content: str, project_root: Path) -> list[str]:
 
 
 def _get_module_exports(tree: ast.Module) -> set[str]:
-    """Return the set of names defined at module level in an AST."""
-    exports: set[str] = set()
+    """Return the set of names defined at module level in an AST.
 
-    for node in ast.iter_child_nodes(tree):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            exports.add(node.name)
-        elif isinstance(node, ast.ClassDef):
-            exports.add(node.name)
-        elif isinstance(node, ast.Assign):
-            for target in node.targets:
+    Walks into ``if``/``try``/``with`` blocks at module level to catch
+    names defined conditionally (e.g. ``try: import X except: ...``).
+    """
+    exports: set[str] = set()
+    _collect_names(tree, exports)
+    return exports
+
+
+def _collect_names(node: ast.AST, exports: set[str]) -> None:
+    """Recursively collect names from an AST node.
+
+    Descends into compound statements (``if``, ``try``, ``with``) to find
+    names that are defined conditionally at module level.
+    """
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+            exports.add(child.name)
+        elif isinstance(child, ast.ClassDef):
+            exports.add(child.name)
+        elif isinstance(child, ast.Assign):
+            for target in child.targets:
                 if isinstance(target, ast.Name):
                     exports.add(target.id)
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            exports.add(node.target.id)
-        elif isinstance(node, ast.ImportFrom):
-            # Re-exports via ``from X import Y``
-            if node.names:
-                for alias in node.names:
+        elif isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
+            exports.add(child.target.id)
+        elif isinstance(child, ast.ImportFrom):
+            if child.names:
+                for alias in child.names:
                     name = alias.asname if alias.asname else alias.name
                     exports.add(name)
-        elif isinstance(node, ast.Import):
-            for alias in node.names:
+        elif isinstance(child, ast.Import):
+            for alias in child.names:
                 name = alias.asname if alias.asname else alias.name
                 exports.add(name)
-
-    return exports
+        elif isinstance(child, ast.If | ast.Try | ast.With):
+            # Recurse into compound statements to find conditional definitions
+            _collect_names(child, exports)
+        elif hasattr(ast, "TryStar") and isinstance(child, ast.TryStar):
+            _collect_names(child, exports)
 
 
 def validate_required_sections(content: str) -> list[str]:

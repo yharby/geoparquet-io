@@ -4,8 +4,12 @@ Tests for scripts/validate_claude_md.py which validates that CLAUDE.md
 stays in sync with the actual codebase.
 """
 
+import ast
 import subprocess
+import textwrap
 from pathlib import Path
+
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -56,6 +60,21 @@ class TestValidateClaudeMdIntegration:
         )
         result = _run_validator("--claude-md", str(fake))
         # Should at least not crash with exit code 2
+        assert result.returncode in (0, 1)
+
+    def test_script_accepts_project_root(self, tmp_path):
+        """Verify script accepts --project-root argument."""
+        fake_root = tmp_path / "project"
+        fake_root.mkdir()
+        claude = fake_root / "CLAUDE.md"
+        claude.write_text("## Project Overview\n## Architecture\n## Testing\n## Git Workflow\n")
+        result = _run_validator(
+            "--claude-md",
+            str(claude),
+            "--project-root",
+            str(fake_root),
+        )
+        # Should not crash with exit code 2
         assert result.returncode in (0, 1)
 
     def test_missing_claude_md(self, tmp_path):
@@ -138,6 +157,27 @@ class TestCliCommandValidation:
         assert "add" in commands
         assert "convert" in commands
 
+    def test_filters_parquet_file_arguments(self):
+        """Does not treat file arguments as sub-commands."""
+        from scripts.validate_claude_md import extract_gpio_commands
+
+        content = (
+            "```bash\ngpio inspect file.parquet\ngpio extract input.parquet output.parquet\n```\n"
+        )
+        commands = extract_gpio_commands(content)
+        assert "file.parquet" not in commands
+        assert "input.parquet" not in commands
+        assert "output.parquet" not in commands
+        assert "inspect" in commands
+        assert "extract" in commands
+
+    def test_empty_content_returns_empty_set(self):
+        """Returns empty set for content with no gpio commands."""
+        from scripts.validate_claude_md import extract_gpio_commands
+
+        assert extract_gpio_commands("") == set()
+        assert extract_gpio_commands("No commands here.") == set()
+
     def test_gets_actual_cli_commands(self):
         """Introspects the real CLI to get command names."""
         from scripts.validate_claude_md import get_actual_commands
@@ -196,6 +236,14 @@ class TestFilePathValidation:
         paths = extract_file_paths(content)
         assert "geoparquet_io/cli/main.py" in paths
 
+    def test_extracts_markdown_paths(self):
+        """Extracts .md file paths."""
+        from scripts.validate_claude_md import extract_file_paths
+
+        content = "See `docs/guide/sorting.md` for details."
+        paths = extract_file_paths(content)
+        assert "docs/guide/sorting.md" in paths
+
     def test_skips_generic_patterns(self):
         """Does not treat wildcard patterns like `add_*.py` as concrete paths."""
         from scripts.validate_claude_md import extract_file_paths
@@ -212,11 +260,27 @@ class TestFilePathValidation:
         paths = extract_file_paths(content)
         assert not any("<feature>" in p for p in paths)
 
+    def test_ignores_non_project_paths(self):
+        """Does not extract paths that lack a known project prefix."""
+        from scripts.validate_claude_md import extract_file_paths
+
+        content = "See `random/other.py` for details."
+        paths = extract_file_paths(content)
+        assert len(paths) == 0
+
     def test_validate_file_paths_passes_for_valid(self):
         """No errors for paths that exist."""
         from scripts.validate_claude_md import validate_file_paths
 
         content = "See `geoparquet_io/cli/main.py` for details."
+        errors = validate_file_paths(content, PROJECT_ROOT)
+        assert errors == []
+
+    def test_validate_file_paths_resolves_short_paths(self):
+        """Resolves short paths like `core/common.py` under geoparquet_io/."""
+        from scripts.validate_claude_md import validate_file_paths
+
+        content = "Check `core/common.py` for utilities."
         errors = validate_file_paths(content, PROJECT_ROOT)
         assert errors == []
 
@@ -255,6 +319,31 @@ class TestTestMarkerValidation:
         assert "slow" in markers
         assert "network" in markers
 
+    def test_extracts_markers_from_single_quoted_m_flag(self):
+        """Extracts marker names from single-quoted -m flag references."""
+        from scripts.validate_claude_md import extract_test_markers
+
+        content = """`-m 'not slow and not network'`"""
+        markers = extract_test_markers(content)
+        assert "slow" in markers
+        assert "network" in markers
+
+    def test_excludes_builtin_pytest_markers(self):
+        """Built-in markers like parametrize, skipif are excluded."""
+        from scripts.validate_claude_md import extract_test_markers
+
+        content = (
+            "Use `@pytest.mark.parametrize` for parameterized tests.\n"
+            "Use `@pytest.mark.skipif` for conditional skips.\n"
+            "Use `@pytest.mark.xfail` for expected failures.\n"
+            "Use `@pytest.mark.slow` for slow tests.\n"
+        )
+        markers = extract_test_markers(content)
+        assert "parametrize" not in markers
+        assert "skipif" not in markers
+        assert "xfail" not in markers
+        assert "slow" in markers
+
     def test_validate_markers_passes_for_valid(self):
         """No errors when all referenced markers are defined."""
         from scripts.validate_claude_md import validate_test_markers
@@ -271,6 +360,15 @@ class TestTestMarkerValidation:
         errors = validate_test_markers(content, PROJECT_ROOT / "pyproject.toml")
         assert len(errors) == 1
         assert "flaky" in errors[0]
+
+    def test_validate_markers_missing_pyproject(self, tmp_path):
+        """Reports error when pyproject.toml is missing."""
+        from scripts.validate_claude_md import validate_test_markers
+
+        content = "Use `@pytest.mark.slow` for slow tests."
+        errors = validate_test_markers(content, tmp_path / "nonexistent.toml")
+        assert len(errors) == 1
+        assert "pyproject.toml" in errors[0]
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +390,44 @@ class TestImportValidation:
             imp[0] == "geoparquet_io.core.common" and "get_duckdb_connection" in imp[1]
             for imp in imports
         )
+
+    def test_extracts_multi_name_imports(self):
+        """Extracts imports with multiple names."""
+        from scripts.validate_claude_md import extract_imports
+
+        content = "from geoparquet_io.core.common import foo, bar, baz\n"
+        imports = extract_imports(content)
+        assert len(imports) == 1
+        assert imports[0][0] == "geoparquet_io.core.common"
+        assert imports[0][1] == ["foo", "bar", "baz"]
+
+    def test_extracts_parenthesized_multiline_imports(self):
+        """Extracts multi-line parenthesized imports correctly."""
+        from scripts.validate_claude_md import extract_imports
+
+        content = textwrap.dedent("""\
+            from geoparquet_io.core.common import (
+                get_duckdb_connection,
+                needs_httpfs,
+            )
+        """)
+        imports = extract_imports(content)
+        assert len(imports) >= 1
+        mod, names = imports[0]
+        assert mod == "geoparquet_io.core.common"
+        assert "get_duckdb_connection" in names
+        assert "needs_httpfs" in names
+
+    def test_handles_as_alias_in_imports(self):
+        """Extracts original name from 'import X as Y' patterns."""
+        from scripts.validate_claude_md import extract_imports
+
+        content = "from geoparquet_io.core.common import get_duckdb_connection as gdc\n"
+        imports = extract_imports(content)
+        assert len(imports) == 1
+        assert "get_duckdb_connection" in imports[0][1]
+        # Should NOT have the full "get_duckdb_connection as gdc" as a name
+        assert not any("as" in name for name in imports[0][1])
 
     def test_validate_imports_passes_for_valid(self):
         """No errors when imports reference real modules and names."""
@@ -318,6 +454,148 @@ class TestImportValidation:
         errors = validate_imports(content, PROJECT_ROOT)
         assert len(errors) >= 1
         assert "nonexistent_function" in errors[0]
+
+    def test_validate_imports_handles_package_init(self):
+        """Validates imports from package __init__.py files."""
+        from scripts.validate_claude_md import validate_imports
+
+        content = "from geoparquet_io.api import Table\n"
+        errors = validate_imports(content, PROJECT_ROOT)
+        # Should not report module as missing (api/ is a package with __init__.py)
+        assert not any("does not exist" in e and "api" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _parse_import_names
+# ---------------------------------------------------------------------------
+
+
+class TestParseImportNames:
+    """Unit tests for the _parse_import_names helper."""
+
+    def test_simple_names(self):
+        """Parses a simple comma-separated list."""
+        from scripts.validate_claude_md import _parse_import_names
+
+        assert _parse_import_names("foo, bar, baz") == ["foo", "bar", "baz"]
+
+    def test_strips_whitespace(self):
+        """Strips leading/trailing whitespace from names."""
+        from scripts.validate_claude_md import _parse_import_names
+
+        assert _parse_import_names("  foo ,  bar  ") == ["foo", "bar"]
+
+    def test_handles_as_alias(self):
+        """Extracts original name from alias."""
+        from scripts.validate_claude_md import _parse_import_names
+
+        assert _parse_import_names("foo as f, bar as b") == ["foo", "bar"]
+
+    def test_filters_comments(self):
+        """Filters out comment lines."""
+        from scripts.validate_claude_md import _parse_import_names
+
+        assert _parse_import_names("foo, # comment") == ["foo"]
+
+    def test_filters_empty_and_parens(self):
+        """Filters out empty strings and parentheses."""
+        from scripts.validate_claude_md import _parse_import_names
+
+        assert _parse_import_names("(, foo, ), ") == ["foo"]
+
+    def test_multiline_content(self):
+        """Handles content that comes from parenthesized imports."""
+        from scripts.validate_claude_md import _parse_import_names
+
+        content = "\n    get_duckdb_connection,\n    needs_httpfs,\n"
+        names = _parse_import_names(content)
+        assert names == ["get_duckdb_connection", "needs_httpfs"]
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _get_module_exports / _collect_names
+# ---------------------------------------------------------------------------
+
+
+class TestGetModuleExports:
+    """Unit tests for the _get_module_exports helper."""
+
+    def test_finds_functions(self):
+        """Finds top-level function definitions."""
+        from scripts.validate_claude_md import _get_module_exports
+
+        tree = ast.parse("def foo(): pass\ndef bar(): pass\n")
+        exports = _get_module_exports(tree)
+        assert exports == {"foo", "bar"}
+
+    def test_finds_classes(self):
+        """Finds top-level class definitions."""
+        from scripts.validate_claude_md import _get_module_exports
+
+        tree = ast.parse("class Foo: pass\n")
+        exports = _get_module_exports(tree)
+        assert "Foo" in exports
+
+    def test_finds_assignments(self):
+        """Finds top-level variable assignments."""
+        from scripts.validate_claude_md import _get_module_exports
+
+        tree = ast.parse("X = 1\nY: int = 2\n")
+        exports = _get_module_exports(tree)
+        assert "X" in exports
+        assert "Y" in exports
+
+    def test_finds_imports(self):
+        """Finds top-level import re-exports."""
+        from scripts.validate_claude_md import _get_module_exports
+
+        tree = ast.parse("from os.path import join\nimport sys\n")
+        exports = _get_module_exports(tree)
+        assert "join" in exports
+        assert "sys" in exports
+
+    def test_finds_names_in_try_except(self):
+        """Finds names defined inside try/except blocks."""
+        from scripts.validate_claude_md import _get_module_exports
+
+        code = textwrap.dedent("""\
+            try:
+                import tomllib
+            except ImportError:
+                import tomli as tomllib
+
+            def foo():
+                pass
+        """)
+        tree = ast.parse(code)
+        exports = _get_module_exports(tree)
+        assert "tomllib" in exports
+        assert "foo" in exports
+
+    def test_finds_names_in_if_blocks(self):
+        """Finds names defined inside if blocks."""
+        from scripts.validate_claude_md import _get_module_exports
+
+        code = textwrap.dedent("""\
+            import sys
+            if sys.version_info >= (3, 11):
+                import tomllib
+            else:
+                import tomli as tomllib
+        """)
+        tree = ast.parse(code)
+        exports = _get_module_exports(tree)
+        assert "tomllib" in exports
+        assert "sys" in exports
+
+    def test_finds_aliased_imports(self):
+        """Handles 'import X as Y' by returning the alias name."""
+        from scripts.validate_claude_md import _get_module_exports
+
+        tree = ast.parse("import numpy as np\n")
+        exports = _get_module_exports(tree)
+        assert "np" in exports
+        assert "numpy" not in exports
 
 
 # ---------------------------------------------------------------------------
@@ -353,8 +631,21 @@ class TestRequiredSections:
         errors = validate_required_sections(content)
         assert len(errors) >= 1
 
+    def test_reports_specific_missing_sections(self):
+        """Each missing section gets its own error."""
+        from scripts.validate_claude_md import validate_required_sections
+
+        content = "## Project Overview\n"
+        errors = validate_required_sections(content)
+        # Should report Architecture, Testing, Git Workflow as missing
+        assert len(errors) == 3
+        missing_keywords = [e.split("'")[1] for e in errors]
+        assert "Architecture" in missing_keywords
+        assert "Testing" in missing_keywords
+        assert "Git Workflow" in missing_keywords
+
     def test_matches_partial_section_names(self):
-        """Section matching is substring-based (e.g. 'Architecture' matches '## Architecture & Key Files')."""
+        """Section matching is substring-based."""
         from scripts.validate_claude_md import validate_required_sections
 
         content = (
@@ -365,3 +656,104 @@ class TestRequiredSections:
         )
         errors = validate_required_sections(content)
         assert errors == []
+
+    def test_matches_h3_headings(self):
+        """Matches ### headings too, not just ##."""
+        from scripts.validate_claude_md import validate_required_sections
+
+        content = "### Project Overview\n### Architecture\n### Testing\n### Git Workflow\n"
+        errors = validate_required_sections(content)
+        assert errors == []
+
+    def test_case_insensitive_matching(self):
+        """Section matching is case-insensitive."""
+        from scripts.validate_claude_md import validate_required_sections
+
+        content = "## project overview\n## ARCHITECTURE\n## Testing\n## git workflow\n"
+        errors = validate_required_sections(content)
+        assert errors == []
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: main() function
+# ---------------------------------------------------------------------------
+
+
+class TestMainFunction:
+    """Unit tests for the main() entry point."""
+
+    def test_main_with_missing_file(self, tmp_path):
+        """Returns exit code 2 for missing CLAUDE.md."""
+        from scripts.validate_claude_md import main
+
+        missing = tmp_path / "nonexistent.md"
+        rc = main(["--claude-md", str(missing)])
+        assert rc == 2
+
+    def test_main_with_valid_minimal_file(self, tmp_path):
+        """Returns exit code 0 or 1 with a minimal valid file."""
+        from scripts.validate_claude_md import main
+
+        fake = tmp_path / "CLAUDE.md"
+        fake.write_text("## Project Overview\n## Architecture\n## Testing\n## Git Workflow\n")
+        rc = main(["--claude-md", str(fake)])
+        assert rc in (0, 1)
+
+    def test_main_with_custom_project_root(self, tmp_path):
+        """Accepts --project-root argument."""
+        from scripts.validate_claude_md import main
+
+        fake = tmp_path / "CLAUDE.md"
+        fake.write_text("## Project Overview\n## Architecture\n## Testing\n## Git Workflow\n")
+        rc = main(["--claude-md", str(fake), "--project-root", str(tmp_path)])
+        assert rc in (0, 1)
+
+    def test_main_catches_validator_exceptions(self, tmp_path, monkeypatch):
+        """Validator exceptions are caught and reported as errors."""
+        from scripts import validate_claude_md
+        from scripts.validate_claude_md import main
+
+        fake = tmp_path / "CLAUDE.md"
+        fake.write_text("## Project Overview\n## Architecture\n## Testing\n## Git Workflow\n")
+
+        def _raise_error(content):
+            msg = "boom"
+            raise RuntimeError(msg)
+
+        monkeypatch.setattr(validate_claude_md, "validate_required_sections", _raise_error)
+        rc = main(["--claude-md", str(fake), "--project-root", str(tmp_path)])
+        # Should not crash -- should return 1 (errors found)
+        assert rc == 1
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _BUILTIN_PYTEST_MARKERS
+# ---------------------------------------------------------------------------
+
+
+class TestBuiltinMarkers:
+    """Verify the built-in markers list is reasonable."""
+
+    def test_builtin_markers_is_frozenset(self):
+        """The built-in markers constant is a frozenset (immutable)."""
+        from scripts.validate_claude_md import _BUILTIN_PYTEST_MARKERS
+
+        assert isinstance(_BUILTIN_PYTEST_MARKERS, frozenset)
+
+    @pytest.mark.parametrize(
+        "marker",
+        [
+            "parametrize",
+            "skip",
+            "skipif",
+            "xfail",
+            "usefixtures",
+            "filterwarnings",
+            "timeout",
+        ],
+    )
+    def test_expected_builtins_present(self, marker):
+        """Each expected built-in marker is in the set."""
+        from scripts.validate_claude_md import _BUILTIN_PYTEST_MARKERS
+
+        assert marker in _BUILTIN_PYTEST_MARKERS
