@@ -1,4 +1,10 @@
 repos:
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.1.0
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
@@ -97,7 +103,7 @@ repos:
 
     - id: check-commit-msg
       name: check-commit-msg
-      description: Enforce imperative mood in commit messages
+      description: Enforce imperative mood in commit messages (legacy - commitizen hook preferred)
       entry: bash
       args:
         - -c
@@ -110,12 +116,16 @@ repos:
             if echo "$first_line" | grep -q "^Merge"; then
               exit 0
             fi
+            # Skip conventional commits (handled by commitizen hook)
+            if echo "$first_line" | grep -qE "^(feat|fix|docs|style|refactor|perf|test|chore|build|ci|revert)(\(.+\))?!?:"; then
+              exit 0
+            fi
             # Check if starts with capital letter (imperative mood)
             first_char=$(echo "$first_line" | cut -c1)
             if [[ "$first_char" =~ [a-z] ]]; then
-              echo "❌ Commit message should start with a capital letter (imperative mood)"
+              echo "Commit message should start with a capital letter (imperative mood)"
               echo "   Bad:  'added new feature' or 'adding new feature'"
-              echo "   Good: 'Add new feature'"
+              echo "   Good: 'Add new feature' or 'feat(cli): add new feature'"
               echo "   See CLAUDE.md for commit message guidelines"
               exit 1
             fi

@@ -68,6 +68,7 @@ dev = [
     "vulture>=2.14",
     "radon>=6.0.1",
     "xenon>=0.9.3",
+    "commitizen>=4.0",
     "mutmut>=3.0",
     "pyyaml>=6.0",
     "codespell>=2.2",
@@ -230,6 +231,15 @@ skips = [
     "B105",  # hardcoded password: false positive on an ArcGIS token endpoint URL constant.
     "B101",  # assert used: single internal logic guard (assert overall_bounds is not None).
 ]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version = "1.0.0b2"
+version_files = ["pyproject.toml:^version"]
+tag_format = "v$version"
+update_changelog_on_bump = true
+changelog_file = "CHANGELOG.md"
+major_version_zero = true
 
 [tool.vulture]
 min_confidence = 80
