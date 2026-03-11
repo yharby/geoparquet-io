@@ -155,7 +155,9 @@ def _try_detect_wkt_column(con, csv_read, col_names_lower):
                     f"SELECT {actual_col} FROM {csv_read} WHERE {actual_col} IS NOT NULL LIMIT 1"
                 ).fetchone()
                 if sample and sample[0]:
-                    con.execute(f"SELECT ST_GeomFromText('{sample[0]}')").fetchone()
+                    # Validate WKT by parsing it — execute without fetchone to avoid
+                    # DuckDB 1.5+ GEOMETRY serialization error
+                    con.execute(f"SELECT ST_GeomFromText('{sample[0]}')")
                     return actual_col
             except Exception:
                 continue
@@ -311,22 +313,24 @@ def _check_null_wkt_rows(con, csv_read, wkt_col):
 def _check_invalid_wkt_rows(con, csv_read, wkt_col):
     """Check and warn about invalid WKT (when skip_invalid is True)."""
     try:
+        # Use TRY() to catch WKT parse errors — returns NULL for invalid WKT
         invalid_count = con.execute(
             f"SELECT COUNT(*) FROM {csv_read} "
-            f"WHERE {wkt_col} IS NOT NULL AND TRY_CAST(ST_GeomFromText({wkt_col}) AS VARCHAR) IS NULL"
+            f"WHERE {wkt_col} IS NOT NULL AND TRY(ST_GeomFromText({wkt_col})) IS NULL"
         ).fetchone()[0]
 
         if invalid_count > 0:
             warn(f"⚠️  Warning: {invalid_count} rows have invalid WKT and will be skipped")
     except Exception:
-        pass  # DuckDB version might not support TRY_CAST
+        pass
 
 
 def _validate_wkt_strict(con, csv_read, wkt_col):
     """Strictly validate WKT (when skip_invalid is False)."""
     try:
+        # Use ::VARCHAR cast to avoid DuckDB 1.5+ GEOMETRY serialization error
         con.execute(
-            f"SELECT ST_GeomFromText({wkt_col}) FROM {csv_read} WHERE {wkt_col} IS NOT NULL LIMIT 1"
+            f"SELECT ST_GeomFromText({wkt_col})::VARCHAR FROM {csv_read} WHERE {wkt_col} IS NOT NULL LIMIT 1"
         ).fetchone()
     except Exception as e:
         raise click.ClickException(
@@ -401,15 +405,13 @@ def _build_csv_conversion_query(geom_info, skip_hilbert, bounds, skip_invalid, s
         geom_expr = f"ST_GeomFromText({wkt_col})"
         exclude_cols = wkt_col
 
-        # For skip_invalid, we need to wrap the geometry parsing to skip errors
-        # Use TRY_CAST which silently returns NULL for invalid WKT
+        # For skip_invalid, use TRY() to silently return NULL for invalid WKT
         if skip_invalid:
-            # Use TRY_CAST to parse WKT and return NULL for invalid strings
             query_base = f"""
                 WITH parsed_geoms AS (
                     SELECT
                         * EXCLUDE ({exclude_cols}),
-                        TRY_CAST({wkt_col} AS GEOMETRY) AS geometry
+                        TRY(ST_GeomFromText({wkt_col})) AS geometry
                     FROM {csv_read}
                 )
                 SELECT
@@ -464,12 +466,13 @@ def _get_geom_expr_and_where(geom_info, skip_invalid):
     """Get geometry expression and WHERE clause for CSV bounds/query."""
     if geom_info["type"] == "wkt":
         wkt_col = geom_info["wkt_column"]
-        geom_expr = f"ST_GeomFromText({wkt_col})"
-        where_clause = (
-            f"WHERE {wkt_col} IS NOT NULL AND {geom_expr} IS NOT NULL"
-            if skip_invalid
-            else f"WHERE {wkt_col} IS NOT NULL"
-        )
+        if skip_invalid:
+            # Use TRY() to silently skip invalid WKT
+            geom_expr = f"TRY(ST_GeomFromText({wkt_col}))"
+            where_clause = f"WHERE {wkt_col} IS NOT NULL AND {geom_expr} IS NOT NULL"
+        else:
+            geom_expr = f"ST_GeomFromText({wkt_col})"
+            where_clause = f"WHERE {wkt_col} IS NOT NULL"
         return geom_expr, where_clause
 
     # latlon

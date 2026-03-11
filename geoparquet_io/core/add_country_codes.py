@@ -495,6 +495,7 @@ def _create_duckdb_connection(using_default):
     con = duckdb.connect()
     con.execute("INSTALL spatial;")
     con.execute("LOAD spatial;")
+    con.execute("SET geometry_always_xy = true;")
     if using_default:
         con.execute("SET s3_region='us-west-2';")
     return con

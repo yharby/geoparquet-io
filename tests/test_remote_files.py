@@ -190,7 +190,7 @@ class TestGetDuckDBConnection:
 
         con = get_duckdb_connection()
         # Should have spatial extension loaded
-        result = con.execute("SELECT ST_Point(0, 0)").fetchone()
+        result = con.execute("SELECT ST_AsText(ST_Point(0, 0))").fetchone()
         assert result is not None
         con.close()
 
@@ -209,9 +209,9 @@ class TestGetDuckDBConnection:
         from geoparquet_io.core.common import get_duckdb_connection
 
         con = get_duckdb_connection(load_spatial=False)
-        # Spatial functions should not work
+        # Spatial functions should not work (ST_Point is core in 1.5+, but ST_Buffer requires spatial)
         with pytest.raises(duckdb.CatalogException):
-            con.execute("SELECT ST_Point(0, 0)").fetchone()
+            con.execute("SELECT ST_Buffer(ST_Point(0, 0), 1.0)").fetchone()
         con.close()
 
 

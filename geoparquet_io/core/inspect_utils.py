@@ -489,6 +489,7 @@ def wkb_to_wkt_preview(wkb_bytes: bytes, max_length: int = 45) -> str:
     try:
         with duckdb.connect() as con:
             con.execute("LOAD spatial;")
+            con.execute("SET geometry_always_xy = true;")
 
             # Check if this is DuckDB's internal GEOMETRY format (starts with 0x02)
             # vs standard ISO WKB (starts with 0x00 or 0x01 for byte order)
@@ -733,6 +734,7 @@ def get_column_statistics(
     try:
         con.execute("INSTALL spatial;")
         con.execute("LOAD spatial;")
+        con.execute("SET geometry_always_xy = true;")
 
         stats = {}
 

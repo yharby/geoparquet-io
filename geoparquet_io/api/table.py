@@ -139,6 +139,7 @@ def _calculate_bounds_from_table(
     try:
         con = duckdb.connect()
         con.execute("INSTALL spatial; LOAD spatial;")
+        con.execute("SET geometry_always_xy = true;")
         con.register("input_table", table)
 
         # Use ST_Extent to get the bounding box of all geometries
@@ -1600,6 +1601,7 @@ class Table:
         try:
             con = duckdb.connect()
             con.execute("INSTALL spatial; LOAD spatial;")
+            con.execute("SET geometry_always_xy = true;")
             con.register("input_table", self._table)
 
             stats = {}

@@ -108,6 +108,7 @@ def get_file_info(filepath: Path) -> dict[str, Any]:
     try:
         conn = duckdb.connect()
         conn.execute("INSTALL spatial; LOAD spatial;")
+        conn.execute("SET geometry_always_xy = true;")
 
         # Get feature count and basic info
         result = conn.execute(f"""
@@ -245,6 +246,7 @@ def benchmark_duckdb(input_path: Path, output_path: Path) -> tuple[float, float]
 
     conn = duckdb.connect()
     conn.execute("INSTALL spatial; LOAD spatial;")
+    conn.execute("SET geometry_always_xy = true;")
     conn.execute(f"""
         COPY (SELECT * FROM ST_Read('{input_path}'))
         TO '{output_path}'

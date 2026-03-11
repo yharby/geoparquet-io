@@ -276,6 +276,7 @@ def _setup_duckdb_connection(dataset):
     con = duckdb.connect()
     con.execute("INSTALL spatial;")
     con.execute("LOAD spatial;")
+    con.execute("SET geometry_always_xy = true;")
     con.execute("INSTALL httpfs;")
     con.execute("LOAD httpfs;")
     dataset.configure_s3(con)

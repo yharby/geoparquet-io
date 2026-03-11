@@ -150,8 +150,7 @@ def reproject_table(
                     ST_Transform(
                         "{geom_col}",
                         '{effective_source_crs}',
-                        '{target_crs}',
-                        always_xy := true
+                        '{target_crs}'
                     )
                 ) AS "{geom_col}"
             FROM {source_table}
@@ -320,7 +319,7 @@ def reproject_impl(
         exclude_clause = ", ".join(f'"{c}"' for c in exclude_cols)
 
         # Build SQL query with ST_Transform
-        # Use always_xy := true since GeoParquet uses lon/lat (x/y) axis order
+        # geometry_always_xy is set at connection level (DuckDB 1.5+)
         log("Reprojecting...")
         query = f"""
             SELECT
@@ -328,8 +327,7 @@ def reproject_impl(
                 ST_Transform(
                     "{geom_col}",
                     '{effective_source_crs}',
-                    '{target_crs}',
-                    always_xy := true
+                    '{target_crs}'
                 ) AS "{geom_col}"
             FROM '{input_url}'
         """
@@ -494,8 +492,7 @@ def _reproject_streaming(
                     ST_Transform(
                         "{geom_col}",
                         '{effective_source_crs}',
-                        '{target_crs}',
-                        always_xy := true
+                        '{target_crs}'
                     ) AS "{geom_col}"
                 FROM '{working_url}'
             """

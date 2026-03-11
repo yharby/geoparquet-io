@@ -289,12 +289,12 @@ class DuckDBKVStrategy(BaseWriteStrategy):
         verbose: bool,
     ) -> None:
         """Write parquet-geo-only format (no geo metadata)."""
-        from geoparquet_io.core.common import _wrap_query_with_wkb_conversion
-
         if verbose:
             debug("Writing parquet-geo-only (no geo metadata)...")
 
-        final_query = _wrap_query_with_wkb_conversion(query, geometry_column, con)
+        # DuckDB 1.5+: Keep native GEOMETRY type — DuckDB writes native Parquet
+        # geometry encoding directly. No WKB conversion needed.
+        final_query = query
         escaped_path = local_path.replace("'", "''")
 
         copy_options = _build_copy_options(compression, row_group_rows)
@@ -350,11 +350,13 @@ class DuckDBKVStrategy(BaseWriteStrategy):
         self._compute_missing_metadata(con, query, geometry_column, col_meta, verbose)
         self._add_bbox_covering_if_present(con, query, col_meta, verbose)
 
-        # For v1.x: Cast to BLOB. For v2.0: Keep geoarrow extension type
+        # For v1.x: Cast to BLOB so DuckDB writes plain binary WKB.
+        # For v2.0: Keep native GEOMETRY type — DuckDB writes native Parquet
+        # geometry encoding directly.
         if geoparquet_version in ("1.0", "1.1"):
             final_query = _wrap_query_with_blob_conversion(query, geometry_column, con)
         else:
-            final_query = _wrap_query_with_wkb_conversion(query, geometry_column, con)
+            final_query = query
 
         escaped_path = local_path.replace("'", "''")
         geo_meta_escaped = json.dumps(geo_meta).replace("'", "''")
@@ -459,6 +461,7 @@ class DuckDBKVStrategy(BaseWriteStrategy):
         con = duckdb.connect()
         try:
             con.execute("INSTALL spatial; LOAD spatial")
+            con.execute("SET geometry_always_xy = true;")
             con.register("input_table", table)
 
             # Convert WKB bytes to GEOMETRY for proper spatial processing
