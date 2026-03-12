@@ -109,6 +109,29 @@ def get_default_memory_limit() -> str:
     return f"{max(128, int(limit_mb))}MB"  # Minimum 128MB
 
 
+def _wrap_query_with_crs(
+    query: str,
+    geometry_column: str,
+    input_crs: dict | None,
+) -> str:
+    """Wrap query with ST_SetCRS() so DuckDB writes CRS into the Parquet schema natively.
+
+    DuckDB 1.5+ writes CRS from the GEOMETRY type directly into the Parquet
+    schema during COPY TO — no post-processing needed.
+    """
+    from geoparquet_io.core.common import is_default_crs
+
+    if not input_crs or is_default_crs(input_crs):
+        return query
+
+    escaped_geom = geometry_column.replace('"', '""')
+    crs_json = json.dumps(input_crs).replace("'", "''")
+    return f"""
+        SELECT * REPLACE (ST_SetCRS("{escaped_geom}", '{crs_json}') AS "{escaped_geom}")
+        FROM ({query})
+    """
+
+
 def _detect_bbox_column_name(schema_names: list[str]) -> str | None:
     """Detect bbox column name from schema using common naming conventions."""
     for name in schema_names:
@@ -133,39 +156,6 @@ def _build_copy_options(
     if row_group_rows:
         options.append(f"ROW_GROUP_SIZE {row_group_rows}")
     return options
-
-
-def _apply_crs_if_needed(
-    local_path: str,
-    input_crs: dict | None,
-    geometry_column: str,
-    compression: str,
-    compression_level: int,
-    row_group_rows: int | None,
-    add_to_geo_metadata: bool,
-    verbose: bool,
-) -> None:
-    """Apply CRS to Parquet schema if non-default CRS is provided."""
-    if not input_crs:
-        return
-
-    from geoparquet_io.core.common import apply_crs_to_parquet, is_default_crs
-
-    if is_default_crs(input_crs):
-        return
-
-    if verbose:
-        debug("Applying CRS to Parquet schema...")
-    apply_crs_to_parquet(
-        local_path,
-        input_crs,
-        geometry_column=geometry_column,
-        compression=compression,
-        compression_level=compression_level,
-        row_group_rows=row_group_rows,
-        add_to_geo_metadata=add_to_geo_metadata,
-        verbose=verbose,
-    )
 
 
 class DuckDBKVStrategy(BaseWriteStrategy):
@@ -294,23 +284,13 @@ class DuckDBKVStrategy(BaseWriteStrategy):
 
         # DuckDB 1.5+: Keep native GEOMETRY type — DuckDB writes native Parquet
         # geometry encoding directly. No WKB conversion needed.
-        final_query = query
+        # Apply CRS via ST_SetCRS so DuckDB writes it into the schema natively.
+        final_query = _wrap_query_with_crs(query, geometry_column, input_crs)
         escaped_path = local_path.replace("'", "''")
 
         copy_options = _build_copy_options(compression, row_group_rows)
         copy_query = f"COPY ({final_query}) TO '{escaped_path}' ({', '.join(copy_options)})"
         con.execute(copy_query)
-
-        _apply_crs_if_needed(
-            local_path,
-            input_crs,
-            geometry_column,
-            compression.lower(),
-            compression_level,
-            row_group_rows,
-            add_to_geo_metadata=False,
-            verbose=verbose,
-        )
 
         if verbose:
             pf = pq.ParquetFile(local_path)
@@ -350,12 +330,12 @@ class DuckDBKVStrategy(BaseWriteStrategy):
         self._add_bbox_covering_if_present(con, query, col_meta, verbose)
 
         # For v1.x: Cast to BLOB so DuckDB writes plain binary WKB.
-        # For v2.0: Keep native GEOMETRY type — DuckDB writes native Parquet
-        # geometry encoding directly.
+        # For v2.0: Keep native GEOMETRY type with CRS — DuckDB writes native
+        # Parquet geometry encoding and CRS directly.
         if geoparquet_version in ("1.0", "1.1"):
             final_query = _wrap_query_with_blob_conversion(query, geometry_column, con)
         else:
-            final_query = query
+            final_query = _wrap_query_with_crs(query, geometry_column, input_crs)
 
         escaped_path = local_path.replace("'", "''")
         geo_meta_escaped = json.dumps(geo_meta).replace("'", "''")
@@ -366,19 +346,6 @@ class DuckDBKVStrategy(BaseWriteStrategy):
         if verbose:
             debug(f"Writing via DuckDB COPY TO with {compression} compression...")
         con.execute(copy_query)
-
-        # For v2.0, apply CRS to Parquet schema
-        if geoparquet_version == "2.0":
-            _apply_crs_if_needed(
-                local_path,
-                input_crs,
-                geometry_column,
-                compression.lower(),
-                compression_level,
-                row_group_rows,
-                add_to_geo_metadata=False,
-                verbose=verbose,
-            )
 
         if verbose:
             pf = pq.ParquetFile(local_path)

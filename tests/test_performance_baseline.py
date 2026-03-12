@@ -41,14 +41,10 @@ class TestV2PerformanceBaseline:
 
     def test_v2_with_crs_baseline(self, fields_5070_file, temp_output_file):
         """
-        Baseline: v2.0 conversion with CRS (dual-write path).
+        Baseline: v2.0 conversion with CRS.
 
-        Current implementation:
-        1. DuckDB writes file
-        2. apply_crs_to_parquet() rewrites with CRS in schema
-        3. add_crs_to_geoparquet_metadata() rewrites with CRS in metadata
-
-        This is the slowest path and the target for optimization.
+        DuckDB 1.5+ writes CRS natively via ST_SetCRS() during COPY TO.
+        Single-pass write — no post-processing file rewrite needed.
         """
         elapsed = measure_conversion_time(
             fields_5070_file,
@@ -89,11 +85,7 @@ class TestV2PerformanceBaseline:
         """
         Baseline: parquet-geo-only conversion with CRS.
 
-        Current implementation:
-        1. DuckDB writes file
-        2. apply_crs_to_parquet() rewrites with CRS in schema
-
-        This is faster than v2.0 with CRS (only 1 rewrite, not 2).
+        DuckDB 1.5+ writes CRS natively via ST_SetCRS() during COPY TO.
         """
         elapsed = measure_conversion_time(
             fields_5070_file,
@@ -279,9 +271,10 @@ class TestFileSize:
         min_size = min(sizes.values())
         variance = (max_size - min_size) / min_size
 
-        # Note: Variance threshold increased to 25% because with smaller test files
-        # (100 rows), metadata overhead is proportionally larger
-        assert variance < 0.25, f"File size variance {variance:.1%} exceeds 25%"
+        # Note: Variance threshold increased to 50% because DuckDB 1.5+ native
+        # geometry shredding compresses v2.0/parquet-geo-only ~30% smaller than
+        # v1.x WKB blobs, which is expected and desirable.
+        assert variance < 0.50, f"File size variance {variance:.1%} exceeds 50%"
 
 
 @pytest.mark.skip(reason="File I/O monitoring requires platform-specific tools")

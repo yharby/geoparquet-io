@@ -6,8 +6,8 @@ Verifies that:
 - Row group sizes are maintained correctly
 - Settings are consistent across DuckDB, PyArrow, and geoarrow-pyarrow paths
 
-This is critical because the v2.0 dual-write path (apply_crs_to_parquet + add_crs_to_geoparquet_metadata)
-must apply the same settings in both writes.
+DuckDB 1.5+ writes CRS natively via ST_SetCRS() during COPY TO, so
+settings only need to be consistent in the single DuckDB write pass.
 """
 
 import os
@@ -105,13 +105,9 @@ class TestCompressionPreservation:
 
     def test_v2_with_crs_preserves_compression(self, fields_5070_file, temp_output_file):
         """
-        Test that v2.0 with CRS preserves compression through dual-write path.
+        Test that v2.0 with CRS preserves compression settings.
 
-        This is CRITICAL: the current implementation writes the file twice for v2.0 with CRS:
-        1. apply_crs_to_parquet()
-        2. add_crs_to_geoparquet_metadata()
-
-        Both writes must use the same compression settings.
+        DuckDB 1.5+ writes CRS natively in a single pass via ST_SetCRS().
         """
         convert_to_geoparquet(
             fields_5070_file,

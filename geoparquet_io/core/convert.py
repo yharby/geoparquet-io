@@ -157,7 +157,7 @@ def _try_detect_wkt_column(con, csv_read, col_names_lower):
                 if sample and sample[0]:
                     # Validate WKT by parsing it — execute without fetchone to avoid
                     # DuckDB 1.5+ GEOMETRY serialization error
-                    con.execute(f"SELECT ST_GeomFromText('{sample[0]}')")
+                    con.execute("SELECT ST_GeomFromText(?)", [sample[0]])
                     return actual_col
             except Exception:
                 continue
@@ -883,9 +883,9 @@ def _read_csv_to_arrow(
         if skip_invalid:
             query = f"""
                 SELECT * EXCLUDE ({wkt_col}),
-                       ST_AsWKB(TRY_CAST({wkt_col} AS GEOMETRY)) AS geometry
+                       ST_AsWKB(TRY(ST_GeomFromText({wkt_col}))) AS geometry
                 FROM {csv_read}
-                WHERE TRY_CAST({wkt_col} AS GEOMETRY) IS NOT NULL
+                WHERE TRY(ST_GeomFromText({wkt_col})) IS NOT NULL
             """
         else:
             query = f"""
