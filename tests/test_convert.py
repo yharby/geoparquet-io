@@ -297,7 +297,9 @@ class TestConvertBestPractices:
         con.execute("INSTALL spatial;")
         con.execute("LOAD spatial;")
 
-        result = con.execute(f"SELECT ST_AsText(geometry) FROM '{temp_output_file}' LIMIT 1").fetchone()
+        result = con.execute(
+            f"SELECT ST_AsText(geometry) FROM '{temp_output_file}' LIMIT 1"
+        ).fetchone()
         assert result is not None
         con.close()
 
@@ -485,7 +487,9 @@ class TestConvertCSVCore:
         con = duckdb.connect()
         con.execute("INSTALL spatial;")
         con.execute("LOAD spatial;")
-        result = con.execute(f"SELECT ST_AsText(geometry) FROM '{temp_output_file}' LIMIT 1").fetchone()
+        result = con.execute(
+            f"SELECT ST_AsText(geometry) FROM '{temp_output_file}' LIMIT 1"
+        ).fetchone()
         assert result is not None
         con.close()
 

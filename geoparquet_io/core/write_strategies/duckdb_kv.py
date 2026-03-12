@@ -335,7 +335,6 @@ class DuckDBKVStrategy(BaseWriteStrategy):
         """Write with geo metadata (v1.0, v1.1, v2.0)."""
         from geoparquet_io.core.common import (
             _wrap_query_with_blob_conversion,
-            _wrap_query_with_wkb_conversion,
         )
 
         geo_meta = build_geo_metadata(
