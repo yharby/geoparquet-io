@@ -166,9 +166,7 @@ class TestV2CRSLocation:
         """
         Test v2.0 has CRS in BOTH Parquet schema AND GeoParquet metadata.
 
-        This is the key behavior we're testing - v2.0 currently does TWO writes:
-        1. apply_crs_to_parquet() - writes CRS to Parquet schema
-        2. add_crs_to_geoparquet_metadata() - writes CRS to 'geo' metadata
+        DuckDB 1.5+ writes CRS natively via ST_SetCRS() during COPY TO.
 
         Expected:
         - GeoParquet 'geo' metadata: Has CRS
