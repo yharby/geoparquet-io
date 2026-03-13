@@ -211,22 +211,26 @@ def _setup_bigquery_connection() -> duckdb.DuckDBPyConnection:
     # Use get_duckdb_connection for consistent setup (spatial + geometry_always_xy)
     con = get_duckdb_connection(load_spatial=True, load_httpfs=False)
 
-    # Layer BigQuery extension on top
-    # CRITICAL: spatial must be loaded BEFORE bigquery for geography conversion
     try:
-        con.execute("FORCE INSTALL bigquery FROM community;")
+        # Layer BigQuery extension on top
+        # CRITICAL: spatial must be loaded BEFORE bigquery for geography conversion
+        try:
+            con.execute("FORCE INSTALL bigquery FROM community;")
+        except Exception:
+            # Ignore race conditions during parallel extension installation
+            pass
+        con.execute("LOAD bigquery;")
+
+        # Reduce BigQuery Storage API network transfer with ZSTD compression
+        con.execute("SET bq_arrow_compression = 'ZSTD';")
+
+        # Note: bq_geography_as_geometry is NOT set — deprecated in DuckDB 1.5.
+        # GEOGRAPHY columns map to GEOMETRY automatically (core type).
+
+        return con
     except Exception:
-        # Ignore race conditions during parallel extension installation
-        pass
-    con.execute("LOAD bigquery;")
-
-    # Reduce BigQuery Storage API network transfer with ZSTD compression
-    con.execute("SET bq_arrow_compression = 'ZSTD';")
-
-    # Note: bq_geography_as_geometry is NOT set — deprecated in DuckDB 1.5.
-    # GEOGRAPHY columns map to GEOMETRY automatically (core type).
-
-    return con
+        con.close()
+        raise
 
 
 def get_bigquery_connection(
@@ -248,18 +252,22 @@ def get_bigquery_connection(
     """
     con = _setup_bigquery_connection()
 
-    # Configure authentication via environment variable if credentials file provided
-    if credentials_file:
-        # Expand user paths like ~/
-        credentials_file = os.path.expanduser(credentials_file)
-        if not os.path.exists(credentials_file):
-            raise FileNotFoundError(f"Credentials file not found: {credentials_file}")
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_file
+    try:
+        # Configure authentication via environment variable if credentials file provided
+        if credentials_file:
+            # Expand user paths like ~/
+            credentials_file = os.path.expanduser(credentials_file)
+            if not os.path.exists(credentials_file):
+                raise FileNotFoundError(f"Credentials file not found: {credentials_file}")
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_file
 
-    # Note: project ID is specified in the fully-qualified table name
-    # (project.dataset.table) passed to bigquery_scan(), not as a SET parameter
+        # Note: project ID is specified in the fully-qualified table name
+        # (project.dataset.table) passed to bigquery_scan(), not as a SET parameter
 
-    return con
+        return con
+    except Exception:
+        con.close()
+        raise
 
 
 def _get_table_row_count(
