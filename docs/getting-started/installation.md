@@ -4,15 +4,18 @@
 
 **CLI tool**:
 ```bash
-pipx install geoparquet-io
-# or: uv tool install geoparquet-io
+pipx install --pip-args='--pre' geoparquet-io
+# or: uv tool install --prerelease=allow geoparquet-io
 ```
 
 **Python library**:
 ```bash
-pip install geoparquet-io
-# or: uv add geoparquet-io
+pip install --pre geoparquet-io
+# or: uv add --prerelease=allow geoparquet-io
 ```
+
+!!! note "Pre-release versions"
+    geoparquet-io is currently in beta. The `--pre` flag (pip/pipx) or `--prerelease=allow` (uv) is required until version 1.0.0 is released.
 
 pipx and uv tool install the CLI in isolation while keeping it globally available. Use pip/uv add when you need the Python API in your project.
 
@@ -150,12 +153,12 @@ To upgrade to the latest version:
 
 ```bash
 # CLI tool
-pipx upgrade geoparquet-io
-# or: uv tool upgrade geoparquet-io
+pipx upgrade geoparquet-io --pip-args='--pre'
+# or: uv tool upgrade --prerelease=allow geoparquet-io
 
 # Python library
-pip install --upgrade geoparquet-io
-# or: uv add geoparquet-io (automatically gets latest)
+pip install --upgrade --pre geoparquet-io
+# or: uv add --prerelease=allow geoparquet-io
 ```
 
 ## Uninstalling
