@@ -250,6 +250,7 @@ def geoparquet_version_option(func):
     - 1.0: GeoParquet 1.0 with WKB encoding
     - 1.1: GeoParquet 1.1 with WKB encoding
     - 2.0: GeoParquet 2.0 with native Parquet geo types
+    - both: Native Parquet geo types + v1 metadata (max compatibility)
     - parquet-geo-only: Native Parquet geo types without GeoParquet metadata
 
     If not specified, auto-detects from input: preserves input version,
@@ -257,11 +258,11 @@ def geoparquet_version_option(func):
     """
     return click.option(
         "--geoparquet-version",
-        type=click.Choice(["1.0", "1.1", "2.0", "parquet-geo-only"]),
+        type=click.Choice(["1.0", "1.1", "2.0", "both", "parquet-geo-only"]),
         default=None,
-        help="GeoParquet version to write (1.0, 1.1, 2.0, parquet-geo-only). "
-        "Auto-detects from input if not specified: preserves input version, "
-        "upgrades native geo types to 2.0, defaults to 1.1.",
+        help="GeoParquet version to write (1.0, 1.1, 2.0, both, parquet-geo-only). "
+        "'both' writes native geometry + v1 metadata for max compatibility. "
+        "Auto-detects from input if not specified.",
     )(func)
 
 

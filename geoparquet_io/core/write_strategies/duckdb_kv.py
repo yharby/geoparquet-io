@@ -330,8 +330,8 @@ class DuckDBKVStrategy(BaseWriteStrategy):
         self._add_bbox_covering_if_present(con, query, col_meta, verbose)
 
         # For v1.x: Cast to BLOB so DuckDB writes plain binary WKB.
-        # For v2.0: Keep native GEOMETRY type with CRS — DuckDB writes native
-        # Parquet geometry encoding and CRS directly.
+        # For v2.0/both: Keep native GEOMETRY type with CRS — DuckDB writes
+        # native Parquet geometry encoding and CRS directly.
         if geoparquet_version in ("1.0", "1.1"):
             final_query = _wrap_query_with_blob_conversion(query, geometry_column, con)
         else:

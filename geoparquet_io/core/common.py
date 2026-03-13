@@ -57,6 +57,7 @@ GEOPARQUET_VERSIONS = {
     "1.0": {"duckdb_param": "V1", "metadata_version": "1.0.0", "rewrite_metadata": True},
     "1.1": {"duckdb_param": "V1", "metadata_version": "1.1.0", "rewrite_metadata": True},
     "2.0": {"duckdb_param": "V2", "metadata_version": "2.0.0", "rewrite_metadata": False},
+    "both": {"duckdb_param": "NONE", "metadata_version": "1.1.0", "rewrite_metadata": True},
     "parquet-geo-only": {
         "duckdb_param": "NONE",
         "metadata_version": None,
