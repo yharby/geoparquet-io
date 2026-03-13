@@ -13,7 +13,11 @@ import os
 import duckdb
 import pyarrow as pa
 
-from geoparquet_io.core.common import handle_output_overwrite, write_geoparquet_table
+from geoparquet_io.core.common import (
+    get_duckdb_connection,
+    handle_output_overwrite,
+    write_geoparquet_table,
+)
 from geoparquet_io.core.extract import parse_bbox
 from geoparquet_io.core.logging_config import (
     configure_verbose,
@@ -139,11 +143,9 @@ class BigQueryConnection:
         self,
         project: str | None = None,
         credentials_file: str | None = None,
-        geography_as_geometry: bool = True,
     ):
         self.project = project
         self.credentials_file = credentials_file
-        self.geography_as_geometry = geography_as_geometry
         self._original_creds: str | None = None
         self._creds_was_set: bool = False
         self._creds_modified: bool = False
@@ -176,15 +178,7 @@ class BigQueryConnection:
         self._creds_was_set = "GOOGLE_APPLICATION_CREDENTIALS" in os.environ
 
         try:
-            # Use get_duckdb_connection for consistent setup (spatial extension)
-            from geoparquet_io.core.common import get_duckdb_connection
-
-            self._con = get_duckdb_connection(load_spatial=True, load_httpfs=False)
-
-            # Layer BigQuery extension on top
-            # CRITICAL: spatial must be loaded BEFORE bigquery for geography conversion
-            self._con.execute("INSTALL bigquery FROM community;")
-            self._con.execute("LOAD bigquery;")
+            self._con = _setup_bigquery_connection()
 
             # Configure authentication via environment variable if credentials file provided
             if self.credentials_file:
@@ -193,13 +187,6 @@ class BigQueryConnection:
                     raise FileNotFoundError(f"Credentials file not found: {expanded_path}")
                 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = expanded_path
                 self._creds_modified = True
-
-            # Set geography conversion AFTER spatial is loaded
-            if self.geography_as_geometry:
-                self._con.execute("SET bq_geography_as_geometry=true;")
-
-            # Note: project ID is specified in the fully-qualified table name
-            # (project.dataset.table) passed to bigquery_scan(), not as a SET parameter
 
             return self._con
 
@@ -213,16 +200,45 @@ class BigQueryConnection:
         return False  # Don't suppress exceptions
 
 
+def _setup_bigquery_connection() -> duckdb.DuckDBPyConnection:
+    """Create and configure a DuckDB connection with BigQuery extension.
+
+    Sets up spatial (via get_duckdb_connection), then layers BigQuery on top
+    with ZSTD Arrow compression for efficient network transfer.
+
+    DuckDB 1.5+: GEOGRAPHY maps to GEOMETRY automatically (core type),
+    so bq_geography_as_geometry is no longer needed.
+
+    Returns:
+        Configured DuckDB connection with spatial + BigQuery extensions
+    """
+    # Use get_duckdb_connection for consistent setup (spatial + geometry_always_xy)
+    con = get_duckdb_connection(load_spatial=True, load_httpfs=False)
+
+    # Layer BigQuery extension on top
+    # CRITICAL: spatial must be loaded BEFORE bigquery for geography conversion
+    try:
+        con.execute("FORCE INSTALL bigquery FROM community;")
+    except Exception:
+        # Ignore race conditions during parallel extension installation
+        pass
+    con.execute("LOAD bigquery;")
+
+    # Reduce BigQuery Storage API network transfer with ZSTD compression
+    con.execute("SET bq_arrow_compression = 'ZSTD';")
+
+    # Note: bq_geography_as_geometry is NOT set — deprecated in DuckDB 1.5.
+    # GEOGRAPHY columns map to GEOMETRY automatically (core type).
+
+    return con
+
+
 def get_bigquery_connection(
     project: str | None = None,
     credentials_file: str | None = None,
-    geography_as_geometry: bool = True,
 ) -> duckdb.DuckDBPyConnection:
     """
     Create DuckDB connection with BigQuery extension loaded.
-
-    CRITICAL: Spatial extension must be loaded BEFORE setting
-    bq_geography_as_geometry=true for proper GEOGRAPHY conversion.
 
     NOTE: This function mutates GOOGLE_APPLICATION_CREDENTIALS environment variable.
     For proper cleanup, use BigQueryConnection context manager instead.
@@ -230,20 +246,11 @@ def get_bigquery_connection(
     Args:
         project: Default GCP project ID (optional, uses gcloud default if not set)
         credentials_file: Path to service account JSON file (optional)
-        geography_as_geometry: Convert GEOGRAPHY to GEOMETRY (default: True)
 
     Returns:
         Configured DuckDB connection with BigQuery extension
     """
-    from geoparquet_io.core.common import get_duckdb_connection
-
-    # Use get_duckdb_connection for consistent setup (spatial extension)
-    con = get_duckdb_connection(load_spatial=True, load_httpfs=False)
-
-    # Layer BigQuery extension on top
-    # CRITICAL: spatial must be loaded BEFORE bigquery for geography conversion
-    con.execute("INSTALL bigquery FROM community;")
-    con.execute("LOAD bigquery;")
+    con = _setup_bigquery_connection()
 
     # Configure authentication via environment variable if credentials file provided
     if credentials_file:
@@ -252,10 +259,6 @@ def get_bigquery_connection(
         if not os.path.exists(credentials_file):
             raise FileNotFoundError(f"Credentials file not found: {credentials_file}")
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_file
-
-    # Set geography conversion AFTER spatial is loaded
-    if geography_as_geometry:
-        con.execute("SET bq_geography_as_geometry=true;")
 
     # Note: project ID is specified in the fully-qualified table name
     # (project.dataset.table) passed to bigquery_scan(), not as a SET parameter
@@ -792,7 +795,6 @@ def _execute_bigquery_extraction(
     with BigQueryConnection(
         project=project,
         credentials_file=credentials_file,
-        geography_as_geometry=True,
     ) as con:
         # Detect geometry column from schema
         geom_col = _detect_geometry_column_from_schema(con, validated_table_id, geography_column)

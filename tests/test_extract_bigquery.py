@@ -14,6 +14,7 @@ import uuid
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -230,29 +231,85 @@ class TestPythonAPI:
 class TestBigQueryConnection:
     """Test BigQuery connection setup."""
 
-    @patch("duckdb.connect")
-    def test_connection_loads_extensions_in_order(self, mock_connect):
-        """Test that spatial extension is loaded before bigquery settings."""
+    @patch("geoparquet_io.core.extract_bigquery.get_duckdb_connection")
+    def test_connection_loads_extensions_in_order(self, mock_get_con):
+        """Test that spatial is loaded before bigquery, and bigquery install uses try/except."""
         from geoparquet_io.core.extract_bigquery import get_bigquery_connection
 
         mock_con = MagicMock()
-        mock_connect.return_value = mock_con
+        mock_get_con.return_value = mock_con
 
         try:
             get_bigquery_connection()
         except Exception:
             pass  # May fail without actual BigQuery, but we check calls
 
-        # Verify order of execute calls
+        # Verify get_duckdb_connection was called with spatial=True
+        mock_get_con.assert_called_once_with(load_spatial=True, load_httpfs=False)
+
+        # Verify bigquery extension is loaded
         calls = [call[0][0] for call in mock_con.execute.call_args_list]
-        spatial_idx = next((i for i, c in enumerate(calls) if "spatial" in c.lower()), -1)
-        bq_geom_idx = next(
-            (i for i, c in enumerate(calls) if "geography_as_geometry" in c.lower()), -1
+        load_bq_calls = [c for c in calls if "LOAD bigquery" in c]
+        assert load_bq_calls, "LOAD bigquery should be called"
+
+    @patch("geoparquet_io.core.extract_bigquery.get_duckdb_connection")
+    def test_connection_no_deprecated_geography_setting(self, mock_get_con):
+        """Test that deprecated bq_geography_as_geometry is NOT set (v1.5+)."""
+        from geoparquet_io.core.extract_bigquery import get_bigquery_connection
+
+        mock_con = MagicMock()
+        mock_get_con.return_value = mock_con
+
+        try:
+            get_bigquery_connection()
+        except Exception:
+            pass
+
+        calls = [call[0][0] for call in mock_con.execute.call_args_list]
+        geom_setting_calls = [c for c in calls if "geography_as_geometry" in c.lower()]
+        assert not geom_setting_calls, (
+            "bq_geography_as_geometry is deprecated in DuckDB 1.5 — should not be set"
         )
 
-        # Spatial should be loaded before geography setting
-        if spatial_idx >= 0 and bq_geom_idx >= 0:
-            assert spatial_idx < bq_geom_idx, "Spatial must be loaded before geography setting"
+    @patch("geoparquet_io.core.extract_bigquery.get_duckdb_connection")
+    def test_connection_sets_arrow_compression(self, mock_get_con):
+        """Test that bq_arrow_compression is set for efficient data transfer."""
+        from geoparquet_io.core.extract_bigquery import get_bigquery_connection
+
+        mock_con = MagicMock()
+        mock_get_con.return_value = mock_con
+
+        try:
+            get_bigquery_connection()
+        except Exception:
+            pass
+
+        calls = [call[0][0] for call in mock_con.execute.call_args_list]
+        compression_calls = [c for c in calls if "bq_arrow_compression" in c.lower()]
+        assert compression_calls, "bq_arrow_compression should be set for network efficiency"
+
+    @patch("geoparquet_io.core.extract_bigquery.get_duckdb_connection")
+    def test_connection_handles_install_race(self, mock_get_con):
+        """Test that bigquery INSTALL failure (race condition) is handled gracefully."""
+        from geoparquet_io.core.extract_bigquery import get_bigquery_connection
+
+        mock_con = MagicMock()
+        mock_get_con.return_value = mock_con
+
+        # Simulate INSTALL failing (already installed by another worker)
+        def execute_side_effect(sql):
+            if "INSTALL" in sql and "bigquery" in sql.lower():
+                raise duckdb.IOException("Extension already installed")
+            return mock_con
+
+        mock_con.execute.side_effect = execute_side_effect
+
+        try:
+            get_bigquery_connection()
+        except duckdb.IOException:
+            pytest.fail("INSTALL race condition should be handled gracefully")
+        except Exception:
+            pass  # Other errors (LOAD failing) are fine in test
 
     def test_credentials_file_validation(self):
         """Test that non-existent credentials file raises error."""
@@ -260,6 +317,28 @@ class TestBigQueryConnection:
 
         with pytest.raises(FileNotFoundError, match="Credentials file not found"):
             get_bigquery_connection(credentials_file="/nonexistent/path/credentials.json")
+
+    @patch("geoparquet_io.core.extract_bigquery._setup_bigquery_connection")
+    def test_context_manager_no_deprecated_geography_setting(self, mock_setup):
+        """Test BigQueryConnection context manager doesn't set deprecated setting."""
+        from geoparquet_io.core.extract_bigquery import BigQueryConnection
+
+        mock_con = MagicMock()
+        mock_setup.return_value = mock_con
+
+        try:
+            with BigQueryConnection() as _con:
+                pass
+        except Exception:
+            pass
+
+        # _setup_bigquery_connection handles all DuckDB config;
+        # BigQueryConnection should not add deprecated settings on top
+        calls = [call[0][0] for call in mock_con.execute.call_args_list]
+        geom_setting_calls = [c for c in calls if "geography_as_geometry" in c.lower()]
+        assert not geom_setting_calls, (
+            "BigQueryConnection should not set deprecated bq_geography_as_geometry in v1.5"
+        )
 
 
 # Integration tests that require BigQuery access
