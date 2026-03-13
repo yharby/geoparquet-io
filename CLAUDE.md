@@ -102,8 +102,8 @@ geoparquet_io/
 | `convert.py` |  | 1189 |
 | `metadata_utils.py` | Utilities for extracting and formatting GeoParquet... | 1077 |
 | `arcgis.py` | ArcGIS Feature Service to GeoParquet conversion. | 975 |
-| `extract_bigquery.py` |  | 909 |
 | `partition_common.py` |  | 908 |
+| `extract_bigquery.py` |  | 907 |
 | `admin_datasets.py` |  | 735 |
 | `benchmark.py` | Benchmark utilities for comparing GeoParquet conve... | 701 |
 | `partition_admin_hierarchical.py` |  | 698 |
