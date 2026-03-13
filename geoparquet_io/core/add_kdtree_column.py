@@ -118,16 +118,7 @@ def _build_sampling_query(
     """
 
     # Execute to get boundaries
-    try:
-        boundaries_result = con.execute(boundaries_query).fetchall()
-    except Exception as e:
-        if "TransactionContext" in str(e):
-            raise click.ClickException(
-                "KDTree operations are temporarily unavailable due to a DuckDB 1.5.0 regression "
-                "(TransactionContext internal error with recursive CTE + window functions). "
-                "See: https://github.com/duckdb/duckdb-spatial/issues/768"
-            ) from e
-        raise
+    boundaries_result = con.execute(boundaries_query).fetchall()
 
     # Build boundaries dictionary: {(iteration, partition_id): split_value}
     # The partition_id here is the NEW partition after the split

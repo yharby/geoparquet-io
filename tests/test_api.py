@@ -176,10 +176,6 @@ class TestTable:
         assert "my_s2" in result.column_names
         assert result.num_rows == 766
 
-    @pytest.mark.xfail(
-        reason="DuckDB 1.5.0 TransactionContext regression (duckdb/duckdb-spatial#768)",
-        raises=Exception,
-    )
     def test_add_kdtree(self, sample_table):
         """Test add_kdtree() method."""
         result = sample_table.add_kdtree()
@@ -187,10 +183,6 @@ class TestTable:
         assert "kdtree_cell" in result.column_names
         assert result.num_rows == 766
 
-    @pytest.mark.xfail(
-        reason="DuckDB 1.5.0 TransactionContext regression (duckdb/duckdb-spatial#768)",
-        raises=Exception,
-    )
     def test_add_kdtree_custom_params(self, sample_table):
         """Test add_kdtree() with custom parameters."""
         result = sample_table.add_kdtree(iterations=5, sample_size=1000)
@@ -569,10 +561,6 @@ class TestOpsNewFunctions:
         assert isinstance(result, pa.Table)
         assert "s2_cell" in result.column_names
 
-    @pytest.mark.xfail(
-        reason="DuckDB 1.5.0 TransactionContext regression (duckdb/duckdb-spatial#768)",
-        raises=Exception,
-    )
     def test_add_kdtree(self, arrow_table):
         """Test ops.add_kdtree()."""
         result = ops.add_kdtree(arrow_table, iterations=5)
@@ -630,10 +618,6 @@ class TestReadPartition:
             except OSError:
                 time.sleep(0.1 * (attempt + 1))
 
-    @pytest.mark.xfail(
-        reason="DuckDB 1.5.0 TransactionContext regression (duckdb/duckdb-spatial#768)",
-        raises=Exception,
-    )
     def test_read_partition_from_directory(self, partition_dir):
         """Test reading a partitioned directory."""
         from geoparquet_io import read_partition
