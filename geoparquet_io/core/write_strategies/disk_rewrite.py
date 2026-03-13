@@ -180,6 +180,7 @@ class DiskRewriteStrategy(BaseWriteStrategy):
         con = duckdb.connect()
         try:
             con.execute("INSTALL spatial; LOAD spatial")
+            con.execute("SET geometry_always_xy = true;")
             con.register("input_table", table)
 
             # Convert WKB bytes to GEOMETRY for proper spatial processing

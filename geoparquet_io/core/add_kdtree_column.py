@@ -255,7 +255,7 @@ def add_kdtree_table(
                 input_url, geom_col, kdtree_column_name, iterations, sample_size, con, verbose=False
             )
 
-            result = con.execute(query).fetch_arrow_table()
+            result = con.execute(query).arrow().read_all()
 
             # Preserve metadata
             if table.schema.metadata:

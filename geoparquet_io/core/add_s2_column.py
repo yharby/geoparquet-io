@@ -132,7 +132,7 @@ def add_s2_table(
 
         source_ref = _create_geometry_view(con, table, geom_col)
         query = _build_s2_select_query(table, source_ref, geom_col, s2_column_name, level)
-        result = con.execute(query).fetch_arrow_table()
+        result = con.execute(query).arrow().read_all()
 
         # Preserve metadata
         if table.schema.metadata:

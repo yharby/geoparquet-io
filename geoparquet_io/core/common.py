@@ -849,6 +849,9 @@ def get_duckdb_connection(load_spatial=True, load_httpfs=None, use_s3_auth=False
             # See: https://github.com/duckdb/duckdb/issues/12589
             pass
         con.execute("LOAD spatial;")
+        # DuckDB 1.5+: ensure lon/lat = x/y axis order globally.
+        # Replaces per-call always_xy := true in ST_Transform.
+        con.execute("SET geometry_always_xy = true;")
 
     # Load httpfs for cloud storage support
     if load_httpfs:
@@ -3019,7 +3022,7 @@ def write_geoparquet_via_arrow(
             debug("Fetching query results as Arrow table...")
 
         result = con.execute(final_query)
-        table = result.fetch_arrow_table()
+        table = result.arrow().read_all()
 
         # Normalize large_string/large_binary back to string/binary for Parquet compatibility
         table = _normalize_arrow_large_types(table)

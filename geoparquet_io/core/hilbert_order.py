@@ -111,7 +111,7 @@ def hilbert_order_table(
                 ORDER BY ST_Hilbert("{geom_col}",
                     ST_Extent(ST_MakeEnvelope({xmin}, {ymin}, {xmax}, {ymax})))
             """
-        result = con.execute(query).fetch_arrow_table()
+        result = con.execute(query).arrow().read_all()
 
         # Preserve metadata
         if table.schema.metadata:

@@ -350,7 +350,7 @@ class TestHilbertSort:
         import pyarrow as pa
 
         # Create 10000 rows to ensure DuckDB creates multiple row groups
-        wkb_point = bytes.fromhex("0101000000000000000000000000000000000000000000000000000000")
+        wkb_point = bytes.fromhex("010100000000000000000000000000000000000000")
         n_rows = 10000
         table = pa.table(
             {
@@ -485,7 +485,7 @@ class TestPartition:
         try:
             # Create simple test data with valid WKB
             # WKB for POINT(0 0): 0101000000 00000000 00000000 00000000 00000000
-            wkb_point = bytes.fromhex("0101000000000000000000000000000000000000000000000000000000")
+            wkb_point = bytes.fromhex("010100000000000000000000000000000000000000")
             table = pa.table(
                 {
                     "id": ["1", "2", "3", "4"],

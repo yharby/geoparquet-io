@@ -155,7 +155,9 @@ def _try_detect_wkt_column(con, csv_read, col_names_lower):
                     f"SELECT {actual_col} FROM {csv_read} WHERE {actual_col} IS NOT NULL LIMIT 1"
                 ).fetchone()
                 if sample and sample[0]:
-                    con.execute(f"SELECT ST_GeomFromText('{sample[0]}')").fetchone()
+                    # Validate WKT by parsing it — execute without fetchone to avoid
+                    # DuckDB 1.5+ GEOMETRY serialization error
+                    con.execute("SELECT ST_GeomFromText(?)", [sample[0]])
                     return actual_col
             except Exception:
                 continue
@@ -309,24 +311,52 @@ def _check_null_wkt_rows(con, csv_read, wkt_col):
 
 
 def _check_invalid_wkt_rows(con, csv_read, wkt_col):
-    """Check and warn about invalid WKT (when skip_invalid is True)."""
+    """Check and warn about invalid WKT rows when skip_invalid is True.
+
+    Uses TRY(ST_GeomFromText(...)) to count rows where WKT parsing fails.
+    DuckDB 1.5+ requires TRY() instead of TRY_CAST(... AS GEOMETRY) for
+    geometry parsing error handling.
+
+    Args:
+        con: DuckDB connection with spatial extension loaded.
+        csv_read: SQL expression for reading the CSV (e.g., "read_csv('file.csv')").
+        wkt_col: Name of the WKT column to validate.
+    """
     try:
+        # Use TRY() to catch WKT parse errors — returns NULL for invalid WKT
         invalid_count = con.execute(
             f"SELECT COUNT(*) FROM {csv_read} "
-            f"WHERE {wkt_col} IS NOT NULL AND TRY_CAST(ST_GeomFromText({wkt_col}) AS VARCHAR) IS NULL"
+            f"WHERE {wkt_col} IS NOT NULL AND TRY(ST_GeomFromText({wkt_col})) IS NULL"
         ).fetchone()[0]
 
         if invalid_count > 0:
             warn(f"⚠️  Warning: {invalid_count} rows have invalid WKT and will be skipped")
-    except Exception:
-        pass  # DuckDB version might not support TRY_CAST
+    except Exception as e:
+        # May fail on older DuckDB versions or connection issues; log for debugging
+        debug(f"Could not count invalid WKT rows: {e}")
 
 
 def _validate_wkt_strict(con, csv_read, wkt_col):
-    """Strictly validate WKT (when skip_invalid is False)."""
+    """Strictly validate WKT column when skip_invalid is False.
+
+    Attempts to parse one non-NULL WKT value to verify the column contains
+    valid geometry. Raises ClickException with helpful message on failure.
+
+    Uses ::VARCHAR cast on the result to avoid DuckDB 1.5+ GEOMETRY type
+    serialization errors when fetching results to Python.
+
+    Args:
+        con: DuckDB connection with spatial extension loaded.
+        csv_read: SQL expression for reading the CSV (e.g., "read_csv('file.csv')").
+        wkt_col: Name of the WKT column to validate.
+
+    Raises:
+        click.ClickException: If WKT parsing fails, with suggestion to use --skip-invalid.
+    """
     try:
+        # Use ::VARCHAR cast to avoid DuckDB 1.5+ GEOMETRY serialization error
         con.execute(
-            f"SELECT ST_GeomFromText({wkt_col}) FROM {csv_read} WHERE {wkt_col} IS NOT NULL LIMIT 1"
+            f"SELECT ST_GeomFromText({wkt_col})::VARCHAR FROM {csv_read} WHERE {wkt_col} IS NOT NULL LIMIT 1"
         ).fetchone()
     except Exception as e:
         raise click.ClickException(
@@ -401,15 +431,13 @@ def _build_csv_conversion_query(geom_info, skip_hilbert, bounds, skip_invalid, s
         geom_expr = f"ST_GeomFromText({wkt_col})"
         exclude_cols = wkt_col
 
-        # For skip_invalid, we need to wrap the geometry parsing to skip errors
-        # Use TRY_CAST which silently returns NULL for invalid WKT
+        # For skip_invalid, use TRY() to silently return NULL for invalid WKT
         if skip_invalid:
-            # Use TRY_CAST to parse WKT and return NULL for invalid strings
             query_base = f"""
                 WITH parsed_geoms AS (
                     SELECT
                         * EXCLUDE ({exclude_cols}),
-                        TRY_CAST({wkt_col} AS GEOMETRY) AS geometry
+                        TRY(ST_GeomFromText({wkt_col})) AS geometry
                     FROM {csv_read}
                 )
                 SELECT
@@ -464,12 +492,13 @@ def _get_geom_expr_and_where(geom_info, skip_invalid):
     """Get geometry expression and WHERE clause for CSV bounds/query."""
     if geom_info["type"] == "wkt":
         wkt_col = geom_info["wkt_column"]
-        geom_expr = f"ST_GeomFromText({wkt_col})"
-        where_clause = (
-            f"WHERE {wkt_col} IS NOT NULL AND {geom_expr} IS NOT NULL"
-            if skip_invalid
-            else f"WHERE {wkt_col} IS NOT NULL"
-        )
+        if skip_invalid:
+            # Use TRY() to silently skip invalid WKT
+            geom_expr = f"TRY(ST_GeomFromText({wkt_col}))"
+            where_clause = f"WHERE {wkt_col} IS NOT NULL AND {geom_expr} IS NOT NULL"
+        else:
+            geom_expr = f"ST_GeomFromText({wkt_col})"
+            where_clause = f"WHERE {wkt_col} IS NOT NULL"
         return geom_expr, where_clause
 
     # latlon
@@ -609,7 +638,13 @@ def _convert_csv_path(
     verbose,
     geoparquet_version=None,
 ):
-    """Handle CSV/TSV conversion path. Returns SQL query."""
+    """Handle CSV/TSV conversion path. Returns SQL query.
+
+    When skip_invalid=True, materializes parsed geometries into a temp table
+    to avoid re-evaluating TRY(ST_GeomFromText(...)) in downstream metadata
+    queries. DuckDB 1.5 can segfault when ST_GeometryType() or spatial
+    aggregates operate on inlined TRY() subqueries under parallel execution.
+    """
     from geoparquet_io.core.common import should_skip_bbox
 
     # Determine if bbox should be skipped for this version
@@ -656,9 +691,20 @@ def _convert_csv_path(
                 msg = "Reading CSV, creating geometries, and applying Hilbert ordering..."
         debug(msg)
 
-    return _build_csv_conversion_query(
+    query = _build_csv_conversion_query(
         geom_info, effective_skip_hilbert, bounds, skip_invalid, skip_bbox=skip_bbox
     )
+
+    # Materialize skip_invalid queries into a temp table to avoid DuckDB 1.5
+    # segfaults. TRY(ST_GeomFromText(...)) in CTE subqueries gets inlined by
+    # the optimizer, causing repeated re-evaluation when downstream metadata
+    # queries (ST_GeometryType, ST_XMin, etc.) wrap the query. Materializing
+    # parses CSV once and eliminates the unsafe TRY() re-evaluation.
+    if skip_invalid and geom_info["type"] == "wkt":
+        con.execute(f"CREATE OR REPLACE TEMP TABLE _gpio_csv_parsed AS {query}")
+        query = "SELECT * FROM _gpio_csv_parsed"
+
+    return query
 
 
 def _convert_spatial_path(
@@ -878,11 +924,18 @@ def _read_csv_to_arrow(
     if geom_info["type"] == "wkt":
         wkt_col = _quote_identifier(geom_info["wkt_column"])
         if skip_invalid:
+            # Use a CTE to evaluate TRY(ST_GeomFromText(...)) once, avoiding
+            # repeated re-evaluation that can segfault in DuckDB 1.5.
             query = f"""
-                SELECT * EXCLUDE ({wkt_col}),
-                       ST_AsWKB(TRY_CAST({wkt_col} AS GEOMETRY)) AS geometry
-                FROM {csv_read}
-                WHERE TRY_CAST({wkt_col} AS GEOMETRY) IS NOT NULL
+                WITH _parsed AS (
+                    SELECT * EXCLUDE ({wkt_col}),
+                           TRY(ST_GeomFromText({wkt_col})) AS _geom
+                    FROM {csv_read}
+                )
+                SELECT * EXCLUDE (_geom),
+                       ST_AsWKB(_geom) AS geometry
+                FROM _parsed
+                WHERE _geom IS NOT NULL
             """
         else:
             query = f"""
@@ -902,7 +955,7 @@ def _read_csv_to_arrow(
         """
 
     result = con.execute(query)
-    return result.fetch_arrow_table()
+    return result.arrow().read_all()
 
 
 def _read_spatial_to_arrow(con, input_url, verbose, is_parquet=False):
@@ -923,7 +976,7 @@ def _read_spatial_to_arrow(con, input_url, verbose, is_parquet=False):
     """
 
     result = con.execute(query)
-    return result.fetch_arrow_table()
+    return result.arrow().read_all()
 
 
 def _determine_effective_crs(

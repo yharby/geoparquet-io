@@ -133,12 +133,11 @@ def _calculate_bounds_from_table(
     if table.num_rows == 0:
         return None
 
-    import duckdb
+    from geoparquet_io.core.common import get_duckdb_connection
 
     con = None
     try:
-        con = duckdb.connect()
-        con.execute("INSTALL spatial; LOAD spatial;")
+        con = get_duckdb_connection(load_spatial=True, load_httpfs=False)
         con.register("input_table", table)
 
         # Use ST_Extent to get the bounding box of all geometries
@@ -227,7 +226,7 @@ def read_partition(
 
     con = get_duckdb_connection(load_spatial=True, load_httpfs=needs_httpfs(path_str))
     try:
-        arrow_table = con.execute(f"SELECT * FROM {expr}").fetch_arrow_table()
+        arrow_table = con.execute(f"SELECT * FROM {expr}").arrow().read_all()
     finally:
         con.close()
 
@@ -1594,12 +1593,11 @@ class Table:
             >>> print(stats['population']['max'])
             10000000
         """
-        import duckdb
+        from geoparquet_io.core.common import get_duckdb_connection
 
         con = None
         try:
-            con = duckdb.connect()
-            con.execute("INSTALL spatial; LOAD spatial;")
+            con = get_duckdb_connection(load_spatial=True, load_httpfs=False)
             con.register("input_table", self._table)
 
             stats = {}

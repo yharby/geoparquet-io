@@ -297,7 +297,9 @@ class TestConvertBestPractices:
         con.execute("INSTALL spatial;")
         con.execute("LOAD spatial;")
 
-        result = con.execute(f"SELECT geometry FROM '{temp_output_file}' LIMIT 1").fetchone()
+        result = con.execute(
+            f"SELECT ST_AsText(geometry) FROM '{temp_output_file}' LIMIT 1"
+        ).fetchone()
         assert result is not None
         con.close()
 
@@ -485,7 +487,9 @@ class TestConvertCSVCore:
         con = duckdb.connect()
         con.execute("INSTALL spatial;")
         con.execute("LOAD spatial;")
-        result = con.execute(f"SELECT geometry FROM '{temp_output_file}' LIMIT 1").fetchone()
+        result = con.execute(
+            f"SELECT ST_AsText(geometry) FROM '{temp_output_file}' LIMIT 1"
+        ).fetchone()
         assert result is not None
         con.close()
 
@@ -614,6 +618,50 @@ class TestConvertCSVValidation:
         con = duckdb.connect()
         count = con.execute(f"SELECT COUNT(*) FROM '{temp_output_file}'").fetchone()[0]
         assert count == 2  # Only 2 valid POINTs out of 4 rows
+        con.close()
+
+    def test_convert_csv_skip_invalid_metadata_computed(
+        self, csv_invalid_wkt_input, temp_output_file
+    ):
+        """Test that skip_invalid correctly computes geo metadata.
+
+        DuckDB 1.5 introduced segfaults when TRY() expressions in CTEs were
+        inlined by the optimizer and re-evaluated by downstream spatial metadata
+        queries (ST_GeometryType, ST_XMin, etc.). This test verifies that the
+        temp table materialization and CTE workarounds produce correct metadata.
+        """
+        import json
+
+        import pyarrow.parquet as pq
+
+        convert_to_geoparquet(
+            csv_invalid_wkt_input, temp_output_file, skip_invalid=True, verbose=False
+        )
+
+        # Verify geo metadata was computed correctly
+        pf = pq.ParquetFile(temp_output_file)
+        geo_meta = json.loads(pf.schema_arrow.metadata[b"geo"].decode("utf-8"))
+
+        # Check geometry_types is computed (triggers ST_GeometryType on TRY() result)
+        geom_col = geo_meta.get("primary_column", "geometry")
+        col_meta = geo_meta["columns"][geom_col]
+        assert "geometry_types" in col_meta
+        assert "Point" in col_meta["geometry_types"]
+
+        # Check bbox is computed (triggers ST_XMin/XMax/YMin/YMax on TRY() result)
+        assert "bbox" in col_meta
+        bbox = col_meta["bbox"]
+        assert len(bbox) == 4
+        # Verify bbox values are reasonable (not NaN or None)
+        assert all(isinstance(v, (int, float)) for v in bbox)
+
+        # Verify geometries can be read and operated on (final sanity check)
+        con = duckdb.connect()
+        con.install_extension("spatial")
+        con.load_extension("spatial")
+        result = con.execute(f"SELECT ST_AsText(geometry) FROM '{temp_output_file}'").fetchall()
+        assert len(result) == 2
+        assert all("POINT" in r[0] for r in result)
         con.close()
 
     def test_convert_csv_invalid_latlon_fails(self, csv_invalid_latlon_input, temp_output_file):

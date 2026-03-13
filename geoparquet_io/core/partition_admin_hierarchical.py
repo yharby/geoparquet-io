@@ -184,6 +184,7 @@ def _setup_duckdb_extensions(con):
     """Load required DuckDB extensions."""
     con.execute("INSTALL spatial;")
     con.execute("LOAD spatial;")
+    con.execute("SET geometry_always_xy = true;")
     con.execute("INSTALL httpfs;")
     con.execute("LOAD httpfs;")
 

@@ -24,7 +24,7 @@ def sample_parquet():
         tmp_name = tmp.name
 
     # Create valid WKB for POINT(0 0)
-    wkb_point = bytes.fromhex("0101000000000000000000000000000000000000000000000000000000")
+    wkb_point = bytes.fromhex("010100000000000000000000000000000000000000")
 
     # Create test data with multiple categories
     table = pa.table(
@@ -156,7 +156,7 @@ class TestHivePartitioning:
             tmp_name = tmp.name
 
         try:
-            wkb_point = bytes.fromhex("0101000000000000000000000000000000000000000000000000000000")
+            wkb_point = bytes.fromhex("010100000000000000000000000000000000000000")
 
             table = pa.table(
                 {
@@ -302,7 +302,7 @@ class TestPartitionStringWithChars:
             tmp_name = tmp.name
 
         try:
-            wkb_point = bytes.fromhex("0101000000000000000000000000000000000000000000000000000000")
+            wkb_point = bytes.fromhex("010100000000000000000000000000000000000000")
 
             table = pa.table(
                 {
@@ -408,7 +408,7 @@ class TestPartitionFormatCompliance:
             tmp_name = tmp.name
 
         try:
-            wkb_point = bytes.fromhex("0101000000000000000000000000000000000000000000000000000000")
+            wkb_point = bytes.fromhex("010100000000000000000000000000000000000000")
 
             table = pa.table(
                 {

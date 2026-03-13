@@ -833,7 +833,7 @@ def _execute_bigquery_extraction(
         # Execute query
         debug(f"Executing BigQuery query: {query}")
         progress("Querying BigQuery...")
-        result = con.execute(query).fetch_arrow_table()
+        result = con.execute(query).arrow().read_all()
         row_count = result.num_rows
         progress(f"Retrieved {row_count:,} rows from BigQuery")
 
