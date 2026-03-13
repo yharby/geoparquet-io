@@ -445,9 +445,7 @@ class DuckDBKVStrategy(BaseWriteStrategy):
         custom_metadata: dict | None = None,
     ) -> None:
         """Write Arrow table to GeoParquet using DuckDB COPY TO with KV_METADATA."""
-        import duckdb
-
-        from geoparquet_io.core.common import _detect_version_from_table
+        from geoparquet_io.core.common import _detect_version_from_table, get_duckdb_connection
 
         configure_verbose(verbose)
         self._validate_output_path(output_path)
@@ -457,10 +455,8 @@ class DuckDBKVStrategy(BaseWriteStrategy):
         if effective_version is None:
             effective_version = _detect_version_from_table(table, verbose)
 
-        con = duckdb.connect()
+        con = get_duckdb_connection(load_spatial=True, load_httpfs=False)
         try:
-            con.execute("INSTALL spatial; LOAD spatial")
-            con.execute("SET geometry_always_xy = true;")
             con.register("input_table", table)
 
             # Convert WKB bytes to GEOMETRY for proper spatial processing
