@@ -99,7 +99,7 @@ geoparquet_io/
 | `inspect_utils.py` | Utilities for inspecting GeoParquet files. | 1548 |
 | `duckdb_metadata.py` | DuckDB-based Parquet metadata extraction. | 1277 |
 | `extract.py` | Extract columns and rows from GeoParquet files. | 1237 |
-| `convert.py` |  | 1163 |
+| `convert.py` |  | 1189 |
 | `metadata_utils.py` | Utilities for extracting and formatting GeoParquet... | 1077 |
 | `arcgis.py` | ArcGIS Feature Service to GeoParquet conversion. | 975 |
 | `extract_bigquery.py` |  | 909 |

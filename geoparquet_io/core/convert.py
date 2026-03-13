@@ -311,7 +311,17 @@ def _check_null_wkt_rows(con, csv_read, wkt_col):
 
 
 def _check_invalid_wkt_rows(con, csv_read, wkt_col):
-    """Check and warn about invalid WKT (when skip_invalid is True)."""
+    """Check and warn about invalid WKT rows when skip_invalid is True.
+
+    Uses TRY(ST_GeomFromText(...)) to count rows where WKT parsing fails.
+    DuckDB 1.5+ requires TRY() instead of TRY_CAST(... AS GEOMETRY) for
+    geometry parsing error handling.
+
+    Args:
+        con: DuckDB connection with spatial extension loaded.
+        csv_read: SQL expression for reading the CSV (e.g., "read_csv('file.csv')").
+        wkt_col: Name of the WKT column to validate.
+    """
     try:
         # Use TRY() to catch WKT parse errors — returns NULL for invalid WKT
         invalid_count = con.execute(
@@ -321,12 +331,28 @@ def _check_invalid_wkt_rows(con, csv_read, wkt_col):
 
         if invalid_count > 0:
             warn(f"⚠️  Warning: {invalid_count} rows have invalid WKT and will be skipped")
-    except Exception:
-        pass
+    except Exception as e:
+        # May fail on older DuckDB versions or connection issues; log for debugging
+        debug(f"Could not count invalid WKT rows: {e}")
 
 
 def _validate_wkt_strict(con, csv_read, wkt_col):
-    """Strictly validate WKT (when skip_invalid is False)."""
+    """Strictly validate WKT column when skip_invalid is False.
+
+    Attempts to parse one non-NULL WKT value to verify the column contains
+    valid geometry. Raises ClickException with helpful message on failure.
+
+    Uses ::VARCHAR cast on the result to avoid DuckDB 1.5+ GEOMETRY type
+    serialization errors when fetching results to Python.
+
+    Args:
+        con: DuckDB connection with spatial extension loaded.
+        csv_read: SQL expression for reading the CSV (e.g., "read_csv('file.csv')").
+        wkt_col: Name of the WKT column to validate.
+
+    Raises:
+        click.ClickException: If WKT parsing fails, with suggestion to use --skip-invalid.
+    """
     try:
         # Use ::VARCHAR cast to avoid DuckDB 1.5+ GEOMETRY serialization error
         con.execute(
