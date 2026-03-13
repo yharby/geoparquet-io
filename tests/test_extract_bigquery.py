@@ -239,10 +239,7 @@ class TestBigQueryConnection:
         mock_con = MagicMock()
         mock_get_con.return_value = mock_con
 
-        try:
-            get_bigquery_connection()
-        except Exception:
-            pass  # May fail without actual BigQuery, but we check calls
+        get_bigquery_connection()
 
         # Verify get_duckdb_connection was called with spatial=True
         mock_get_con.assert_called_once_with(load_spatial=True, load_httpfs=False)
@@ -260,10 +257,7 @@ class TestBigQueryConnection:
         mock_con = MagicMock()
         mock_get_con.return_value = mock_con
 
-        try:
-            get_bigquery_connection()
-        except Exception:
-            pass
+        get_bigquery_connection()
 
         calls = [call[0][0] for call in mock_con.execute.call_args_list]
         geom_setting_calls = [c for c in calls if "geography_as_geometry" in c.lower()]
@@ -279,10 +273,7 @@ class TestBigQueryConnection:
         mock_con = MagicMock()
         mock_get_con.return_value = mock_con
 
-        try:
-            get_bigquery_connection()
-        except Exception:
-            pass
+        get_bigquery_connection()
 
         calls = [call[0][0] for call in mock_con.execute.call_args_list]
         compression_calls = [c for c in calls if "bq_arrow_compression" in c.lower()]
@@ -304,12 +295,8 @@ class TestBigQueryConnection:
 
         mock_con.execute.side_effect = execute_side_effect
 
-        try:
-            get_bigquery_connection()
-        except duckdb.IOException:
-            pytest.fail("INSTALL race condition should be handled gracefully")
-        except Exception:
-            pass  # Other errors (LOAD failing) are fine in test
+        # Should not raise — INSTALL failure is caught internally
+        get_bigquery_connection()
 
     def test_credentials_file_validation(self):
         """Test that non-existent credentials file raises error."""
@@ -326,10 +313,7 @@ class TestBigQueryConnection:
         mock_con = MagicMock()
         mock_setup.return_value = mock_con
 
-        try:
-            with BigQueryConnection() as _con:
-                pass
-        except Exception:
+        with BigQueryConnection() as _con:
             pass
 
         # _setup_bigquery_connection handles all DuckDB config;
