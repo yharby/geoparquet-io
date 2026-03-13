@@ -50,10 +50,9 @@ def _detect_geometry_column(con, input_file, verbose, is_parquet=False):
                 debug(f"Detected geometry column: {col_info[0]}")
             return col_info[0]
 
-    raise click.ClickException(
-        "Could not detect geometry column in input file. "
-        "Expected column named 'geom', 'geometry', 'wkb_geometry', or 'shape'."
-    )
+    if verbose:
+        debug("No geometry column found in input file")
+    return None
 
 
 def _calculate_bounds(con, input_file, geom_column, verbose, is_parquet=False):
@@ -244,13 +243,9 @@ def _detect_csv_geometry_column(
         return geom_info
 
     # No geometry found
-    raise click.ClickException(
-        "Could not detect geometry columns in CSV/TSV file.\n"
-        "Expected one of:\n"
-        "  - WKT column named: wkt, geometry, geom, the_geom, or shape\n"
-        "  - Lat/lon columns named: lat/lon, latitude/longitude, or y/x\n"
-        "Use --wkt-column or --lat-column/--lon-column to specify explicitly."
-    )
+    if verbose:
+        debug("No geometry columns found in CSV/TSV file")
+    return None
 
 
 def _validate_latlon_ranges(con, csv_read, lat_col, lon_col, verbose):
@@ -547,6 +542,14 @@ def _calculate_csv_bounds(con, geom_info, skip_invalid, verbose):
     return bounds_result
 
 
+def _build_plain_select_query(input_file, is_parquet=False, delimiter=None):
+    """Build a SELECT * query for non-geometry file conversion."""
+    if is_parquet:
+        return f"SELECT * FROM read_parquet('{input_file}')"
+    csv_read = _build_csv_read_expr(input_file, delimiter)
+    return f"SELECT * FROM {csv_read}"
+
+
 def _build_conversion_query(
     input_file,
     geom_column,
@@ -653,6 +656,8 @@ def _convert_csv_path(
     geom_info = _detect_csv_geometry_column(
         con, input_file, delimiter, wkt_column, lat_column, lon_column, verbose
     )
+    if geom_info is None:
+        return None
 
     # Validate geometry
     if geom_info["type"] == "wkt":
@@ -714,6 +719,8 @@ def _convert_spatial_path(
     from geoparquet_io.core.common import check_bbox_structure, should_skip_bbox
 
     geom_column = _detect_geometry_column(con, input_file, verbose, is_parquet=is_parquet)
+    if geom_column is None:
+        return None
 
     # Determine if bbox should be skipped for this version
     skip_bbox = should_skip_bbox(geoparquet_version)
@@ -875,6 +882,16 @@ def read_spatial_to_arrow(
         else:
             arrow_table = _read_spatial_to_arrow(con, input_url, verbose, is_parquet=is_parquet)
 
+        # No geometry found — read as plain table
+        if arrow_table is None:
+            if is_parquet:
+                table_expr = f"read_parquet('{input_url}')"
+            else:
+                csv_read = _build_csv_read_expr(input_url, delimiter)
+                table_expr = csv_read
+            arrow_table = con.execute(f"SELECT * FROM {table_expr}").fetch_arrow_table()
+            return arrow_table, None, None
+
         return arrow_table, detected_crs, geometry_column
 
     except duckdb.IOException as e:
@@ -899,10 +916,14 @@ def read_spatial_to_arrow(
 def _read_csv_to_arrow(
     con, input_url, delimiter, wkt_column, lat_column, lon_column, skip_invalid, verbose
 ):
-    """Read CSV/TSV to Arrow table with geometry as WKB."""
+    """Read CSV/TSV to Arrow table with geometry as WKB. Returns None if no geometry."""
     geom_info = _detect_csv_geometry_column(
         con, input_url, delimiter, wkt_column, lat_column, lon_column, verbose
     )
+    if geom_info is None:
+        warn("No geometry columns found in CSV/TSV. Reading as plain table.")
+        csv_read = _build_csv_read_expr(input_url, delimiter)
+        return None
 
     # Validate geometry
     if geom_info["type"] == "wkt":
@@ -959,8 +980,11 @@ def _read_csv_to_arrow(
 
 
 def _read_spatial_to_arrow(con, input_url, verbose, is_parquet=False):
-    """Read spatial file to Arrow table with geometry as WKB."""
+    """Read spatial file to Arrow table with geometry as WKB. Returns None if no geometry."""
     geom_column = _detect_geometry_column(con, input_url, verbose, is_parquet=is_parquet)
+    if geom_column is None:
+        warn("No geometry column found in input file. Reading as plain table.")
+        return None
     quoted_geom = _quote_identifier(geom_column)
 
     if is_parquet:
@@ -1029,7 +1053,7 @@ def _determine_effective_crs(
     return detected
 
 
-def _report_conversion_results(output_file: str, start_time: float) -> None:
+def _report_conversion_results(output_file: str, start_time: float, is_geo: bool = True) -> None:
     """Report conversion results with timing and file size."""
     elapsed = time.time() - start_time
     if is_remote_url(output_file):
@@ -1042,7 +1066,10 @@ def _report_conversion_results(output_file: str, start_time: float) -> None:
         progress(f"Output: {output_file} ({format_size(file_size)})")
     else:
         progress(f"Output: {output_file}")
-    success("✓ Output passes GeoParquet validation")
+    if is_geo:
+        success("✓ Output passes GeoParquet validation")
+    else:
+        success("✓ Converted to optimized Parquet (no geometry)")
 
 
 def convert_to_geoparquet(
@@ -1141,6 +1168,17 @@ def convert_to_geoparquet(
                 geoparquet_version=geoparquet_version,
             )
 
+        # No geometry detected — convert as plain optimized Parquet
+        has_geometry = query is not None
+        if not has_geometry:
+            warn(
+                "No geometry column detected. "
+                "Converting as plain Parquet without GeoParquet metadata."
+            )
+            query = _build_plain_select_query(input_url, is_parquet=is_parquet, delimiter=delimiter)
+            geoparquet_version = "parquet-geo-only"
+            effective_crs = None
+
         write_parquet_with_metadata(
             con,
             query,
@@ -1155,7 +1193,7 @@ def convert_to_geoparquet(
             geoparquet_version=geoparquet_version,
             input_crs=effective_crs,
         )
-        _report_conversion_results(output_file, start_time)
+        _report_conversion_results(output_file, start_time, is_geo=has_geometry)
 
     except duckdb.IOException as e:
         con.close()

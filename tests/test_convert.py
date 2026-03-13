@@ -14,6 +14,8 @@ import os
 import sys
 
 import duckdb
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 from click.testing import CliRunner
 
@@ -861,3 +863,111 @@ class TestConvertCSVCLI:
         con.close()
 
         assert row_count == 1445, f"Expected 1445 rows, got {row_count}"
+
+
+class TestConvertNoGeometry:
+    """Test conversion of files without geometry columns."""
+
+    @pytest.fixture
+    def plain_parquet_input(self, tmp_path):
+        """Create a Parquet file without any geometry column."""
+        table = pa.table(
+            {
+                "id": [1, 2, 3, 4, 5],
+                "name": ["a", "b", "c", "d", "e"],
+                "value": [10.0, 20.0, 30.0, 40.0, 50.0],
+            }
+        )
+        path = str(tmp_path / "plain.parquet")
+        pq.write_table(table, path)
+        return path
+
+    @pytest.fixture
+    def plain_csv_input(self, tmp_path):
+        """Create a CSV file without any geometry column."""
+        path = str(tmp_path / "plain.csv")
+        with open(path, "w") as f:
+            f.write("id,name,value\n")
+            f.write("1,a,10.0\n")
+            f.write("2,b,20.0\n")
+            f.write("3,c,30.0\n")
+        return path
+
+    def test_convert_parquet_no_geometry(self, plain_parquet_input, temp_output_file):
+        """Parquet without geometry should convert to plain optimized Parquet."""
+        convert_to_geoparquet(plain_parquet_input, temp_output_file)
+
+        assert os.path.exists(temp_output_file)
+
+        # Verify same row count
+        con = duckdb.connect()
+        count = con.execute(f"SELECT COUNT(*) FROM '{temp_output_file}'").fetchone()[0]
+        assert count == 5
+
+        # Verify columns preserved (no extra geometry/bbox added)
+        cols = [
+            col[0] for col in con.execute(f"SELECT * FROM '{temp_output_file}' LIMIT 0").description
+        ]
+        assert "id" in cols
+        assert "name" in cols
+        assert "value" in cols
+        assert "geometry" not in cols
+        assert "bbox" not in cols
+        con.close()
+
+        # Verify no geo metadata
+        metadata, _ = get_parquet_metadata(temp_output_file, verbose=False)
+        geo_meta = parse_geo_metadata(metadata, verbose=False)
+        assert geo_meta is None, "Expected no GeoParquet metadata for plain file"
+
+    def test_convert_csv_no_geometry(self, plain_csv_input, temp_output_file):
+        """CSV without geometry should convert to plain optimized Parquet."""
+        convert_to_geoparquet(plain_csv_input, temp_output_file)
+
+        assert os.path.exists(temp_output_file)
+
+        # Verify data preserved
+        con = duckdb.connect()
+        count = con.execute(f"SELECT COUNT(*) FROM '{temp_output_file}'").fetchone()[0]
+        assert count == 3
+
+        cols = [
+            col[0] for col in con.execute(f"SELECT * FROM '{temp_output_file}' LIMIT 0").description
+        ]
+        assert "id" in cols
+        assert "name" in cols
+        assert "geometry" not in cols
+        con.close()
+
+        # Verify no geo metadata
+        metadata, _ = get_parquet_metadata(temp_output_file, verbose=False)
+        geo_meta = parse_geo_metadata(metadata, verbose=False)
+        assert geo_meta is None
+
+    def test_convert_no_geometry_cli_warns(self, plain_parquet_input, temp_output_file):
+        """CLI should warn about missing geometry and succeed."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["convert", plain_parquet_input, temp_output_file])
+
+        assert result.exit_code == 0, f"Command failed: {result.output}"
+        assert os.path.exists(temp_output_file)
+        assert "no geometry column" in result.output.lower()
+
+    def test_convert_no_geometry_skips_hilbert(self, plain_parquet_input, temp_output_file):
+        """No-geometry file with skip_hilbert=False should not error."""
+        # skip_hilbert defaults to False, so this exercises the no-geometry path
+        convert_to_geoparquet(plain_parquet_input, temp_output_file, skip_hilbert=False)
+
+        assert os.path.exists(temp_output_file)
+        con = duckdb.connect()
+        count = con.execute(f"SELECT COUNT(*) FROM '{temp_output_file}'").fetchone()[0]
+        assert count == 5
+        con.close()
+
+    def test_convert_with_geometry_still_works(self, shapefile_input, temp_output_file):
+        """Regression guard: files with geometry still produce GeoParquet."""
+        convert_to_geoparquet(shapefile_input, temp_output_file)
+
+        metadata, _ = get_parquet_metadata(temp_output_file, verbose=False)
+        geo_meta = parse_geo_metadata(metadata, verbose=False)
+        assert geo_meta is not None, "Expected GeoParquet metadata for geo file"
