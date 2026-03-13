@@ -94,7 +94,7 @@ geoparquet_io/
 
 | Module | Purpose | Lines |
 |--------|---------|-------|
-| `common.py` |  | 4073 |
+| `common.py` |  | 3933 |
 | `validate.py` | GeoParquet file validation against specification r... | 2854 |
 | `inspect_utils.py` | Utilities for inspecting GeoParquet files. | 1548 |
 | `duckdb_metadata.py` | DuckDB-based Parquet metadata extraction. | 1277 |
