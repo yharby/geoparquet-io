@@ -905,7 +905,7 @@ def _read_csv_to_arrow(
         """
 
     result = con.execute(query)
-    return result.fetch_arrow_table()
+    return result.arrow().read_all()
 
 
 def _read_spatial_to_arrow(con, input_url, verbose, is_parquet=False):
@@ -926,7 +926,7 @@ def _read_spatial_to_arrow(con, input_url, verbose, is_parquet=False):
     """
 
     result = con.execute(query)
-    return result.fetch_arrow_table()
+    return result.arrow().read_all()
 
 
 def _determine_effective_crs(

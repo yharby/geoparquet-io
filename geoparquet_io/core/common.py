@@ -3022,7 +3022,7 @@ def write_geoparquet_via_arrow(
             debug("Fetching query results as Arrow table...")
 
         result = con.execute(final_query)
-        table = result.fetch_arrow_table()
+        table = result.arrow().read_all()
 
         # Normalize large_string/large_binary back to string/binary for Parquet compatibility
         table = _normalize_arrow_large_types(table)

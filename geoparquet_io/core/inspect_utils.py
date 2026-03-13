@@ -708,7 +708,7 @@ def get_preview_data(
             mode = "head"
 
         # Execute query and convert to PyArrow table
-        table = con.execute(query).fetch_arrow_table()
+        table = con.execute(query).arrow().read_all()
     finally:
         con.close()
 

@@ -228,7 +228,7 @@ def read_partition(
 
     con = get_duckdb_connection(load_spatial=True, load_httpfs=needs_httpfs(path_str))
     try:
-        arrow_table = con.execute(f"SELECT * FROM {expr}").fetch_arrow_table()
+        arrow_table = con.execute(f"SELECT * FROM {expr}").arrow().read_all()
     finally:
         con.close()
 

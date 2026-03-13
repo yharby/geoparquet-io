@@ -194,7 +194,7 @@ def _wrap_query_with_wkb_conversion(
     """
     Wrap query to convert DuckDB geometry back to WKB for Arrow export.
 
-    DuckDB's fetch_arrow_table() exports geometry in DuckDB's native format,
+    DuckDB's Arrow export returns geometry in DuckDB's native format,
     not WKB. This wraps the query to convert geometry back to WKB using ST_AsWKB.
 
     Args:
@@ -315,11 +315,11 @@ def _write_stream_output(
     if geometry_column is None:
         geometry_column = find_geometry_column_from_metadata(original_metadata)
 
-    # Convert geometry to WKB (DuckDB's fetch_arrow_table exports native format)
+    # Convert geometry to WKB (DuckDB's Arrow export uses native format)
     stream_query = _wrap_query_with_wkb_conversion(query, geometry_column)
 
     result = con.execute(stream_query)
-    table = result.fetch_arrow_table()
+    table = result.arrow().read_all()
 
     # Convert WKB binary to geoarrow extension type for streaming
     # This enables native geometry performance in downstream operations

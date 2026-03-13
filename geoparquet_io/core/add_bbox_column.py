@@ -108,7 +108,7 @@ def add_bbox_table(
                        {bbox_expr} AS "{bbox_column_name}"
                 FROM {source_ref}
             """
-        result = con.execute(query).fetch_arrow_table()
+        result = con.execute(query).arrow().read_all()
 
         # Preserve metadata
         if table.schema.metadata:

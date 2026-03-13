@@ -779,7 +779,7 @@ def extract_table(
                 source_ref, selected_columns, spatial_filter, where, limit
             )
 
-        result = con.execute(query).fetch_arrow_table()
+        result = con.execute(query).arrow().read_all()
         if table.schema.metadata:
             result = result.replace_schema_metadata(table.schema.metadata)
         return result

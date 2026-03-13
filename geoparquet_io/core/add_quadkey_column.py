@@ -278,7 +278,7 @@ def add_quadkey_table(
                        lat_lon_to_quadkey({lat_expr}, {lon_expr}, {resolution}) AS "{quadkey_column_name}"
                 FROM {source_ref}
             """
-        result = con.execute(query).fetch_arrow_table()
+        result = con.execute(query).arrow().read_all()
 
         # Preserve metadata
         if table.schema.metadata:

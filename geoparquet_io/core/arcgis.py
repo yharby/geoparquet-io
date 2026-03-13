@@ -620,7 +620,7 @@ def _geojson_page_to_table(
             FROM ST_Read('{temp_file}')
         """
 
-        table = con.execute(query).fetch_arrow_table()
+        table = con.execute(query).arrow().read_all()
         return table
 
     finally:

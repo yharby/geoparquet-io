@@ -87,7 +87,7 @@ class ArrowMemoryStrategy(BaseWriteStrategy):
             debug("Fetching query results as Arrow table...")
 
         result = con.execute(final_query)
-        table = result.fetch_arrow_table()
+        table = result.arrow().read_all()
 
         table = _normalize_arrow_large_types(table)
 

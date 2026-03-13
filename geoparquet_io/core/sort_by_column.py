@@ -69,7 +69,7 @@ def sort_by_column_table(
         order_clause = ", ".join(f'"{col}"{direction}' for col in column_list)
 
         query = f"SELECT * FROM __input_table ORDER BY {order_clause}"
-        result = con.execute(query).fetch_arrow_table()
+        result = con.execute(query).arrow().read_all()
 
         # Preserve metadata
         if table.schema.metadata:

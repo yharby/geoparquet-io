@@ -156,7 +156,7 @@ def reproject_table(
             FROM {source_table}
         """
 
-        result = con.execute(query).fetch_arrow_table()
+        result = con.execute(query).arrow().read_all()
 
         # Update geo metadata with new CRS
         if table.schema.metadata:
