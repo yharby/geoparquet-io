@@ -194,11 +194,14 @@ def check_row_groups(
     )
 
     # Build results dict
-    passed = size_status == "optimal" and row_status == "optimal"
+    # Pass if row count is optimal (size guidelines are secondary)
+    passed = row_status == "optimal"
     issues = []
     recommendations = []
 
-    if size_status != "optimal":
+    # Only report size issues if row count is also problematic
+    # (Row count is what we optimize for; size is just a guideline)
+    if size_status != "optimal" and row_status != "optimal":
         issues.append(size_message)
         recommendations.append("Rewrite with optimal row group size (64-256 MB)")
 
