@@ -291,3 +291,147 @@ class TestFixSpatialOrdering:
         assert fix_result["success"] is True
         assert "Hilbert" in fix_result["fix_applied"]
         assert os.path.exists(output_file)
+
+
+class TestInPlaceFixOperations:
+    """Tests for in-place fix operations (input == output)."""
+
+    def test_fix_compression_inplace(self, places_test_file, temp_output_dir):
+        """Test that in-place compression fix uses temp file and succeeds."""
+        # Create a copy to modify in-place
+        test_file = os.path.join(temp_output_dir, "inplace.parquet")
+        shutil.copy2(places_test_file, test_file)
+
+        # Apply compression fix in-place (input == output)
+        fix_result = fix_compression(
+            parquet_file=test_file,
+            output_file=test_file,  # Same path - in-place operation
+            verbose=False,
+            geoparquet_version="1.1",
+        )
+
+        assert fix_result["success"] is True
+        assert os.path.exists(test_file)
+
+        # Verify file was actually modified (ZSTD compression)
+        from geoparquet_io.core.check_parquet_structure import check_compression
+
+        result = check_compression(test_file, verbose=False, return_results=True)
+        assert result["current_compression"] == "ZSTD"
+
+    def test_fix_compression_inplace_preserves_data(self, places_test_file, temp_output_dir):
+        """Test that in-place fix preserves all data."""
+        import pyarrow.parquet as pq
+
+        test_file = os.path.join(temp_output_dir, "inplace_data.parquet")
+        shutil.copy2(places_test_file, test_file)
+
+        # Read original data
+        original_table = pq.read_table(test_file)
+        original_row_count = len(original_table)
+
+        # Apply in-place fix
+        fix_compression(
+            parquet_file=test_file, output_file=test_file, verbose=False, geoparquet_version="1.1"
+        )
+
+        # Verify data is preserved
+        fixed_table = pq.read_table(test_file)
+        assert len(fixed_table) == original_row_count
+        assert fixed_table.schema.names == original_table.schema.names
+
+
+class TestHilbertDetectionAndWarnings:
+    """Tests for Hilbert-ordered file detection and spatial warnings."""
+
+    def test_spatial_check_passes_for_hilbert_files(self, temp_output_dir):
+        """Test that files with ~100k rows/group are detected as Hilbert-ordered."""
+        from geoparquet_io.core.check_spatial_order import check_spatial_order_bbox_stats
+        from geoparquet_io.core.hilbert_order import hilbert_order
+
+        # Create a test file and apply Hilbert ordering
+        test_file = "tests/data/austria_bbox_covering.parquet"
+        output_file = os.path.join(temp_output_dir, "hilbert_ordered.parquet")
+
+        hilbert_order(
+            input_parquet=test_file,
+            output_parquet=output_file,
+            add_bbox_flag=False,
+            verbose=False,
+            row_group_rows=100000,  # Standard Hilbert row group size
+        )
+
+        # Check spatial ordering - should pass despite high overlap
+        result = check_spatial_order_bbox_stats(
+            output_file, verbose=False, return_results=True, quiet=True
+        )
+
+        # Should be marked as passed (Hilbert-ordered with large groups)
+        assert result["passed"] is True
+        assert result["fix_available"] is False
+
+    def test_spatial_check_fails_for_non_hilbert_files(self, places_test_file, temp_output_dir):
+        """Test that files without proper row grouping get spatial warnings."""
+        import pyarrow.parquet as pq
+
+        from geoparquet_io.core.check_spatial_order import check_spatial_order_bbox_stats
+
+        # Use places_test_file which has ~1000 rows (enough for multiple row groups)
+        output_file = os.path.join(temp_output_dir, "non_hilbert.parquet")
+
+        # Write with very small row groups (not Hilbert pattern, and will cause high overlap)
+        table = pq.read_table(places_test_file)
+        pq.write_table(table, output_file, compression="ZSTD", row_group_size=50)
+
+        result = check_spatial_order_bbox_stats(
+            output_file, verbose=False, return_results=True, quiet=True
+        )
+
+        # Should fail (small row groups with high overlap, not Hilbert pattern)
+        # (places data has high spatial mixing so small row groups will have high overlap)
+        assert result["passed"] is False
+        assert result["fix_available"] is True
+
+
+class TestRowGroupFixIdempotency:
+    """Tests that row group fixes don't loop infinitely."""
+
+    def test_row_group_fix_not_offered_when_optimal(self, temp_output_dir):
+        """Test that files with optimal row count don't get row group fix."""
+        import pyarrow.parquet as pq
+
+        from geoparquet_io.core.check_parquet_structure import check_row_groups
+
+        test_file = "tests/data/austria_bbox_covering.parquet"
+        output_file = os.path.join(temp_output_dir, "optimal_rows.parquet")
+
+        # Write with optimal row count (100k)
+        table = pq.read_table(test_file)
+        pq.write_table(table, output_file, compression="ZSTD", row_group_size=100000)
+
+        result = check_row_groups(output_file, verbose=False, return_results=True, quiet=True)
+
+        # Should pass row count check (even if size is small)
+        assert result["row_status"] == "optimal"
+        # Should NOT offer fix (prevents infinite loop)
+        assert result["fix_available"] is False
+
+    def test_row_group_fix_offered_when_poor_row_count(self, places_test_file, temp_output_dir):
+        """Test that files with poor row count get row group fix."""
+        import pyarrow.parquet as pq
+
+        from geoparquet_io.core.check_parquet_structure import check_row_groups
+
+        # Use places_test_file which has ~1000 rows
+        output_file = os.path.join(temp_output_dir, "poor_rows.parquet")
+
+        # Write with very small row groups (50 rows per group = too small)
+        table = pq.read_table(places_test_file)
+        pq.write_table(table, output_file, compression="ZSTD", row_group_size=50)
+
+        result = check_row_groups(output_file, verbose=False, return_results=True, quiet=True)
+
+        # Should fail row count check (50 rows/group is below 100k minimum)
+        assert result["row_status"] != "optimal"
+        # Should offer fix
+        assert result["fix_available"] is True
