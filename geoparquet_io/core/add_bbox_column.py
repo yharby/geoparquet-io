@@ -10,6 +10,7 @@ from geoparquet_io.core.common import (
     detect_geoparquet_file_type,
     find_primary_geometry_column,
     get_duckdb_connection,
+    handle_output_overwrite,
 )
 from geoparquet_io.core.logging_config import progress, success, warn
 from geoparquet_io.core.partition_reader import require_single_file
@@ -289,16 +290,8 @@ def _add_bbox_file_based(
     overwrite: bool = False,
 ) -> None:
     """Handle file-based add_bbox operation."""
-    # Check if output file exists
-    if output_parquet and not overwrite:
-        from pathlib import Path
-
-        import click
-
-        if Path(output_parquet).exists():
-            raise click.ClickException(
-                f"Output file already exists: {output_parquet}\nUse --overwrite to replace it."
-            )
+    # Check if output file exists and handle overwrite (fixes issue #278)
+    handle_output_overwrite(output_parquet, overwrite, input_parquet)
 
     # Check for partition input (not supported)
     require_single_file(input_parquet, "add bbox")

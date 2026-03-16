@@ -94,16 +94,16 @@ geoparquet_io/
 
 | Module | Purpose | Lines |
 |--------|---------|-------|
-| `common.py` |  | 4073 |
+| `common.py` |  | 4129 |
 | `validate.py` | GeoParquet file validation against specification r... | 2854 |
 | `inspect_utils.py` | Utilities for inspecting GeoParquet files. | 1548 |
 | `duckdb_metadata.py` | DuckDB-based Parquet metadata extraction. | 1277 |
-| `extract.py` | Extract columns and rows from GeoParquet files. | 1237 |
+| `extract.py` | Extract columns and rows from GeoParquet files. | 1225 |
 | `convert.py` |  | 1189 |
 | `metadata_utils.py` | Utilities for extracting and formatting GeoParquet... | 1077 |
 | `arcgis.py` | ArcGIS Feature Service to GeoParquet conversion. | 975 |
-| `extract_bigquery.py` |  | 909 |
 | `partition_common.py` |  | 908 |
+| `extract_bigquery.py` |  | 902 |
 | `admin_datasets.py` |  | 735 |
 | `benchmark.py` | Benchmark utilities for comparing GeoParquet conve... | 701 |
 | `partition_admin_hierarchical.py` |  | 698 |
@@ -112,7 +112,7 @@ geoparquet_io/
 | ... | *36 more modules* | |
 <!-- END GENERATED: core-modules -->
 
-<!-- freshness: last-verified: 2026-03-09, maps-to: geoparquet_io/core/common.py, geoparquet_io/cli/decorators.py -->
+<!-- freshness: last-verified: 2026-03-16, maps-to: geoparquet_io/core/common.py, geoparquet_io/cli/decorators.py -->
 ### Key Patterns
 
 1. **CLI/Core Separation**: CLI commands are thin wrappers; business logic in `core/`
@@ -128,7 +128,7 @@ geoparquet_io/
 
 ---
 
-<!-- freshness: last-verified: 2026-03-09, maps-to: geoparquet_io/core/common.py -->
+<!-- freshness: last-verified: 2026-03-16, maps-to: geoparquet_io/core/common.py -->
 ## Dependencies Quick Reference
 
 ```python
@@ -145,7 +145,7 @@ from geoparquet_io.core.common import is_remote_url, remote_write_context, setup
 
 ---
 
-<!-- freshness: last-verified: 2026-03-09, maps-to: pyproject.toml -->
+<!-- freshness: last-verified: 2026-03-16, maps-to: pyproject.toml -->
 ## Testing with uv
 
 ```bash

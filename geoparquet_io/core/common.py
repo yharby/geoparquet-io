@@ -806,6 +806,62 @@ def validate_parquet_extension(output_file: str, any_extension: bool = False) ->
         )
 
 
+def handle_output_overwrite(
+    output_path: str | None, overwrite: bool, input_path: str | None = None
+) -> None:
+    """
+    Check if output file exists and handle overwrite logic.
+
+    If overwrite=False and file exists, raises an error.
+    If overwrite=True and file exists, deletes the file.
+
+    This is needed because DuckDB's COPY TO command refuses to write to
+    existing files, so we must explicitly delete them when overwrite=True.
+
+    Args:
+        output_path: Path to output file (can be None for in-memory operations)
+        overwrite: Whether to overwrite existing files
+        input_path: Optional input path to check for same-file operations
+
+    Raises:
+        click.ClickException: If file exists and overwrite=False, or if attempting
+            to overwrite input file (would cause data loss)
+    """
+    if not output_path:
+        return
+
+    from pathlib import Path
+
+    output_file = Path(output_path)
+
+    if not output_file.exists():
+        return
+
+    # Check if output is same as input (would cause data loss)
+    if input_path:
+        input_file = Path(input_path)
+        try:
+            # Use resolve() to handle symlinks and relative paths correctly
+            if output_file.resolve() == input_file.resolve():
+                raise click.ClickException(
+                    f"Cannot overwrite input file: {output_path}\n"
+                    f"Input and output paths resolve to the same file.\n"
+                    f"Use a different output path or use in-place operations (e.g., 'gpio check --fix')."
+                )
+        except (OSError, ValueError):
+            # If files don't exist or paths are invalid, continue
+            # (error will be caught elsewhere)
+            pass
+
+    if not overwrite:
+        raise click.ClickException(
+            f"Output file already exists: {output_path}\nUse --overwrite to replace it."
+        )
+
+    # overwrite=True: Delete existing file to allow DuckDB COPY TO to succeed
+    output_file.unlink()
+
+
 def get_duckdb_connection(load_spatial=True, load_httpfs=None, use_s3_auth=False, threads=None):
     """
     Create a DuckDB connection with necessary extensions loaded.
