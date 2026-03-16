@@ -171,9 +171,9 @@ def check_spatial_order_bbox_stats(parquet_file, verbose=False, return_results=F
         debug(f"Analyzing {len(row_group_bboxes)} row groups")
 
     # Detect if this looks like Hilbert ordering with large row groups
-    # (many row groups with ~100k rows each and high overlap is expected)
+    # (row groups with ~100k rows each and high overlap is expected)
     likely_hilbert_with_large_groups = False
-    if len(row_group_bboxes) >= 10:  # Needs multiple row groups to be meaningful
+    if len(row_group_bboxes) >= 5:  # Needs multiple row groups to be meaningful
         # Check average rows per group from parquet metadata
         from geoparquet_io.core.common import get_duckdb_connection, needs_httpfs
 
@@ -219,25 +219,15 @@ def check_spatial_order_bbox_stats(parquet_file, verbose=False, return_results=F
         if verbose:
             debug(f"Overlapping pairs: {overlap_count}/{total_pairs}")
 
-    # Pass if < 30% overlap
-    passed = ratio < 0.3
+    # Pass if < 30% overlap, OR if Hilbert-ordered with large groups (expected behavior)
+    passed = ratio < 0.3 or likely_hilbert_with_large_groups
 
     # Build results dict
     issues = []
     recommendations = []
     if not passed:
-        if likely_hilbert_with_large_groups:
-            # Hilbert ordering with large row groups - high overlap is expected
-            issues.append(
-                f"Row group bboxes overlap (ratio: {ratio:.2f}) - expected with Hilbert ordering and large row groups"
-            )
-            recommendations.append(
-                "Row-level ordering is likely optimal. High row group bbox overlap is "
-                "inherent to space-filling curves with large (100k row) groups."
-            )
-        else:
-            issues.append(f"Poor spatial ordering (overlap ratio: {ratio:.2f})")
-            recommendations.append("Apply Hilbert spatial ordering for better query performance")
+        issues.append(f"Poor spatial ordering (overlap ratio: {ratio:.2f})")
+        recommendations.append("Apply Hilbert spatial ordering for better query performance")
 
     # Print standalone results if not quiet and not return_results
     if not quiet and not return_results and not verbose:

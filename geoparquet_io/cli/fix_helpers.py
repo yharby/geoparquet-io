@@ -176,12 +176,29 @@ def handle_fix_common(
     return output_path, created_backup
 
 
-def display_spatial_result(ratio, show_output):
-    """Display spatial order check result."""
-    if not show_output or ratio is None:
+def display_spatial_result(spatial_result, show_output):
+    """Display spatial order check result.
+
+    Args:
+        spatial_result: Can be either a dict with 'ratio' and 'passed' keys,
+                       or just a float ratio for backward compatibility
+        show_output: Whether to display output
+    """
+    if not show_output:
         return
 
-    if ratio < 0.5:
+    # Handle both dict result and plain ratio for backward compatibility
+    if isinstance(spatial_result, dict):
+        ratio = spatial_result.get("ratio")
+        passed = spatial_result.get("passed", ratio < 0.5 if ratio is not None else True)
+    else:
+        ratio = spatial_result
+        passed = ratio < 0.5 if ratio is not None else True
+
+    if ratio is None:
+        return
+
+    if passed:
         click.echo(click.style("✓ Data appears to be spatially ordered", fg="green"))
     else:
         click.echo(

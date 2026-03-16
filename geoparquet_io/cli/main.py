@@ -507,14 +507,13 @@ def check_all(
             return_results=True,
             quiet=quiet,
         )
-        ratio = spatial_result["ratio"]
 
         from geoparquet_io.cli.fix_helpers import (
             aggregate_check_results,
             display_spatial_result,
         )
 
-        display_spatial_result(ratio, show_output)
+        display_spatial_result(spatial_result, show_output)
 
         # Run spec validation
         from geoparquet_io.core.validate import validate_geoparquet
@@ -664,9 +663,10 @@ def check_spatial(
             quiet=quiet,
         )
         ratio = result["ratio"]
+        passed = result.get("passed", ratio < 0.5 if ratio is not None else True)
 
         if show_output and ratio is not None:
-            if ratio < 0.5:
+            if passed:
                 click.echo(click.style("✓ Data appears to be spatially ordered", fg="green"))
             else:
                 click.echo(
