@@ -15,6 +15,7 @@ from geoparquet_io.core.common import (
     find_primary_geometry_column,
     get_bbox_advice,
     get_parquet_metadata,
+    handle_output_overwrite,
     safe_file_url,
     write_parquet_with_metadata,
 )
@@ -467,24 +468,8 @@ def add_admin_divisions_multi(
         prefix: Optional column name prefix (default: dataset name, use "admin" for admin: format)
         no_cache: Skip local cache and use remote dataset directly
     """
-    # Check if output file exists
-    if output_parquet and not overwrite:
-        from pathlib import Path
-
-        import click
-
-        if Path(output_parquet).exists():
-            raise click.ClickException(
-                f"Output file already exists: {output_parquet}\nUse --overwrite to replace it."
-            )
-
-    # Delete existing file if overwrite=True (fixes issue #278)
-    if output_parquet and overwrite:
-        from pathlib import Path
-
-        output_path = Path(output_parquet)
-        if output_path.exists():
-            output_path.unlink()
+    # Check if output file exists and handle overwrite (fixes issue #278)
+    handle_output_overwrite(output_parquet, overwrite)
 
     # Check for partition input (not supported)
     require_single_file(input_parquet, "add admin-divisions")

@@ -14,6 +14,7 @@ from geoparquet_io.core.common import (
     get_crs_display_name,
     get_duckdb_connection,
     get_parquet_metadata,
+    handle_output_overwrite,
     needs_httpfs,
     safe_file_url,
     setup_aws_profile_if_needed,
@@ -483,22 +484,8 @@ def _add_quadkey_file_based(
     """Handle file-based add_quadkey operation."""
     configure_verbose(verbose)
 
-    # Check if output file exists
-    if output_parquet and not overwrite:
-        from pathlib import Path
-
-        if Path(output_parquet).exists():
-            raise click.ClickException(
-                f"Output file already exists: {output_parquet}\nUse --overwrite to replace it."
-            )
-
-    # Delete existing file if overwrite=True (fixes issue #278)
-    if output_parquet and overwrite:
-        from pathlib import Path
-
-        output_path = Path(output_parquet)
-        if output_path.exists():
-            output_path.unlink()
+    # Check if output file exists and handle overwrite (fixes issue #278)
+    handle_output_overwrite(output_parquet, overwrite)
 
     # Validate resolution
     if not 0 <= resolution <= 23:

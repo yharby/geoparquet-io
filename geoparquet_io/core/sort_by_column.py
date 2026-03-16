@@ -10,6 +10,7 @@ from geoparquet_io.core.common import (
     get_duckdb_connection,
     get_parquet_metadata,
     get_remote_error_hint,
+    handle_output_overwrite,
     is_remote_url,
     needs_httpfs,
     safe_file_url,
@@ -148,22 +149,8 @@ def sort_by_column(
         return
 
     # File-based mode
-    # Check if output file exists
-    if output_parquet and not overwrite:
-        from pathlib import Path
-
-        if Path(output_parquet).exists():
-            raise click.ClickException(
-                f"Output file already exists: {output_parquet}\nUse --overwrite to replace it."
-            )
-
-    # Delete existing file if overwrite=True (fixes issue #278)
-    if output_parquet and overwrite:
-        from pathlib import Path
-
-        output_path = Path(output_parquet)
-        if output_path.exists():
-            output_path.unlink()
+    # Check if output file exists and handle overwrite (fixes issue #278)
+    handle_output_overwrite(output_parquet, overwrite)
 
     # Validate profile is only used with S3
     validate_profile_for_urls(profile, input_parquet, output_parquet)

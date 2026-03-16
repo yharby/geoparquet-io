@@ -12,6 +12,7 @@ import pyarrow.parquet as pq
 from geoparquet_io.core.common import (
     find_primary_geometry_column,
     get_duckdb_connection,
+    handle_output_overwrite,
     needs_httpfs,
     safe_file_url,
 )
@@ -343,22 +344,8 @@ def add_kdtree_column(
         return
 
     # File-based mode
-    # Check if output file exists
-    if output_parquet and not overwrite:
-        from pathlib import Path
-
-        if Path(output_parquet).exists():
-            raise click.ClickException(
-                f"Output file already exists: {output_parquet}\nUse --overwrite to replace it."
-            )
-
-    # Delete existing file if overwrite=True (fixes issue #278)
-    if output_parquet and overwrite:
-        from pathlib import Path
-
-        output_path = Path(output_parquet)
-        if output_path.exists():
-            output_path.unlink()
+    # Check if output file exists and handle overwrite (fixes issue #278)
+    handle_output_overwrite(output_parquet, overwrite)
 
     # Check for partition input (not supported)
     require_single_file(input_parquet, "add kdtree")

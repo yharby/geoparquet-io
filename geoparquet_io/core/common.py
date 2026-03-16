@@ -806,6 +806,42 @@ def validate_parquet_extension(output_file: str, any_extension: bool = False) ->
         )
 
 
+def handle_output_overwrite(output_path: str | None, overwrite: bool) -> None:
+    """
+    Check if output file exists and handle overwrite logic.
+
+    If overwrite=False and file exists, raises an error.
+    If overwrite=True and file exists, deletes the file.
+
+    This is needed because DuckDB's COPY TO command refuses to write to
+    existing files, so we must explicitly delete them when overwrite=True.
+
+    Args:
+        output_path: Path to output file (can be None for in-memory operations)
+        overwrite: Whether to overwrite existing files
+
+    Raises:
+        click.ClickException: If file exists and overwrite=False
+    """
+    if not output_path:
+        return
+
+    from pathlib import Path
+
+    output_file = Path(output_path)
+
+    if not output_file.exists():
+        return
+
+    if not overwrite:
+        raise click.ClickException(
+            f"Output file already exists: {output_path}\nUse --overwrite to replace it."
+        )
+
+    # overwrite=True: Delete existing file to allow DuckDB COPY TO to succeed
+    output_file.unlink()
+
+
 def get_duckdb_connection(load_spatial=True, load_httpfs=None, use_s3_auth=False, threads=None):
     """
     Create a DuckDB connection with necessary extensions loaded.

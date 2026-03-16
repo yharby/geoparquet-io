@@ -25,6 +25,7 @@ from geoparquet_io.core.common import (
     get_duckdb_connection,
     get_duckdb_connection_for_s3,
     get_parquet_metadata,
+    handle_output_overwrite,
     needs_httpfs,
     safe_file_url,
     write_parquet_with_metadata,
@@ -1070,24 +1071,6 @@ def extract(
     )
 
 
-def _check_overwrite_safety(
-    output_parquet: str | None,
-    is_streaming: bool,
-    dry_run: bool,
-    overwrite: bool,
-) -> None:
-    """Check if output file exists and raise error if overwrite not allowed."""
-    if not output_parquet or is_streaming or dry_run:
-        return
-    if not overwrite and Path(output_parquet).exists():
-        raise click.ClickException(
-            f"Output file already exists: {output_parquet}\nUse --overwrite to replace it."
-        )
-    # Delete existing file if overwrite=True (fixes issue #278)
-    if overwrite and Path(output_parquet).exists():
-        Path(output_parquet).unlink()
-
-
 def _validate_column_overlap(
     include_list: list[str] | None,
     exclude_list: list[str] | None,
@@ -1143,7 +1126,9 @@ def _extract_impl(
     exclude_list = [c.strip() for c in exclude_cols.split(",")] if exclude_cols else None
     is_streaming = is_stdin(input_parquet) or should_stream_output(output_parquet)
 
-    _check_overwrite_safety(output_parquet, is_streaming, dry_run, overwrite)
+    # Check if output file exists and handle overwrite (fixes issue #278)
+    if output_parquet and not is_streaming and not dry_run:
+        handle_output_overwrite(output_parquet, overwrite)
 
     if is_streaming and not dry_run:
         bbox_tuple = parse_bbox(bbox) if bbox else None

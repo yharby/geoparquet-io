@@ -13,7 +13,7 @@ import os
 import duckdb
 import pyarrow as pa
 
-from geoparquet_io.core.common import write_geoparquet_table
+from geoparquet_io.core.common import handle_output_overwrite, write_geoparquet_table
 from geoparquet_io.core.extract import parse_bbox
 from geoparquet_io.core.logging_config import (
     configure_verbose,
@@ -730,24 +730,9 @@ def extract_bigquery(
     include_list = [c.strip() for c in include_cols.split(",")] if include_cols else None
     exclude_list = [c.strip() for c in exclude_cols.split(",")] if exclude_cols else None
 
-    # Check if output file exists and overwrite is False
-    if output_parquet and not overwrite and not dry_run:
-        from pathlib import Path
-
-        import click
-
-        if Path(output_parquet).exists():
-            raise click.ClickException(
-                f"Output file already exists: {output_parquet}\nUse --overwrite to replace it."
-            )
-
-    # Delete existing file if overwrite=True (fixes issue #278)
-    if output_parquet and overwrite and not dry_run:
-        from pathlib import Path
-
-        output_path = Path(output_parquet)
-        if output_path.exists():
-            output_path.unlink()
+    # Check if output file exists and handle overwrite (fixes issue #278)
+    if output_parquet and not dry_run:
+        handle_output_overwrite(output_parquet, overwrite)
 
     # Handle dry_run without connecting to BigQuery
     if dry_run:
