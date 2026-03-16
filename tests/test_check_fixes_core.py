@@ -9,6 +9,7 @@ from geoparquet_io.core.check_fixes import (
     fix_bbox_column,
     fix_bbox_metadata,
     fix_compression,
+    fix_spatial_ordering,
 )
 from geoparquet_io.core.check_parquet_structure import (
     check_compression,
@@ -266,3 +267,27 @@ class TestGetGeoparquetVersionFromCheckResults:
         version = get_geoparquet_version_from_check_results(check_results)
 
         assert version is None
+
+
+class TestFixSpatialOrdering:
+    """Tests for fix_spatial_ordering function."""
+
+    def test_fix_spatial_ordering_with_existing_temp_file(self, places_test_file, temp_output_dir):
+        """Test that fix_spatial_ordering works even when output file exists.
+
+        This tests the bug fix for issue #278 where sequential fixes in `check --fix`
+        would fail with "Output file already exists" when a temp file path was reused.
+        """
+        output_file = os.path.join(temp_output_dir, "fixed.parquet")
+
+        # Create the output file to simulate it already existing
+        # (simulating a temp file collision scenario)
+        shutil.copy2(places_test_file, output_file)
+
+        # This should not raise "Output file already exists" error
+        # because fix_spatial_ordering should pass overwrite=True to hilbert_order
+        fix_result = fix_spatial_ordering(places_test_file, output_file, verbose=False)
+
+        assert fix_result["success"] is True
+        assert "Hilbert" in fix_result["fix_applied"]
+        assert os.path.exists(output_file)
