@@ -54,6 +54,12 @@ by_country/
     gpio partition h3 by_country/ --min-size 100MB --resolution 7 --in-place
     ```
 
+=== "A5"
+
+    ```bash
+    gpio partition a5 by_country/ --min-size 100MB --resolution 12 --in-place
+    ```
+
 === "S2"
 
     ```bash

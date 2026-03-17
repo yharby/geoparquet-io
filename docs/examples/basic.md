@@ -64,6 +64,16 @@ gpio.read('input.parquet') \
     .add_h3(resolution=9) \
     .write('with_h3.parquet')
 
+# Add A5 cells
+gpio.read('input.parquet') \
+    .add_a5(resolution=15) \
+    .write('with_a5.parquet')
+
+# Add S2 spherical cells
+gpio.read('input.parquet') \
+    .add_s2(level=13) \
+    .write('with_s2.parquet')
+
 # Add quadkey tiles
 gpio.read('input.parquet') \
     .add_quadkey(resolution=12) \
@@ -73,6 +83,7 @@ gpio.read('input.parquet') \
 gpio.read('input.parquet') \
     .add_bbox() \
     .add_h3(resolution=9) \
+    .add_a5(resolution=13) \
     .add_quadkey(resolution=12) \
     .sort_hilbert() \
     .write('enriched.parquet')

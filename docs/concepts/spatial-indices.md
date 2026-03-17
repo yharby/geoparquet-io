@@ -214,7 +214,7 @@ gpio.read('input.parquet').add_kdtree().write('output.parquet')
 | Column | Cell Shape | Resolution Range | Best For |
 |--------|------------|------------------|----------|
 | **H3** | Hexagon | 0-15 | Aggregations, joins, uniform coverage |
-| **A5** | Pentagon | 0-30 | Equal-area aggregations, joins & analysis |
+| **A5** | Pentagon | 0-31 | Equal-area aggregations, joins & analysis |
 | **S2** | Quad | 0-30 | Global datasets, hierarchical indexing |
 | **Quadkey** | Square | 0-23 | Web mapping, tile workflows |
 | **KD-tree** | Varies | 1-20 | Clustered data, balanced partitions |
@@ -321,7 +321,7 @@ gpio.read('input.parquet') \
 # Add H3/A5 for aggregation, S2 for spherical analysis, quadkey for mapping
 gpio add bbox input.parquet | \
     gpio add h3 --resolution 9 - | \
-    gpio add a5 --resolution 13 - | \
+    gpio add a5 --level 13 - | \
     gpio add s2 --level 13 - | \
     gpio add quadkey --resolution 12 - | \
     gpio sort hilbert - enriched.parquet
