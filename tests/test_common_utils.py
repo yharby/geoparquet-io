@@ -913,7 +913,10 @@ class TestValidateProjjson:
     """Tests for _validate_projjson."""
 
     def test_valid_projjson_with_schema(self):
-        crs = {"$schema": "https://proj.org/schemas/v0.5/projjson.schema.json", "type": "ProjectedCRS"}
+        crs = {
+            "$schema": "https://proj.org/schemas/v0.5/projjson.schema.json",
+            "type": "ProjectedCRS",
+        }
         assert _validate_projjson(crs) is True
 
     def test_valid_projjson_with_type(self):
