@@ -41,14 +41,10 @@ class TestV2PerformanceBaseline:
 
     def test_v2_with_crs_baseline(self, fields_5070_file, temp_output_file):
         """
-        Baseline: v2.0 conversion with CRS (dual-write path).
+        Baseline: v2.0 conversion with CRS.
 
-        Current implementation:
-        1. DuckDB writes file
-        2. apply_crs_to_parquet() rewrites with CRS in schema
-        3. add_crs_to_geoparquet_metadata() rewrites with CRS in metadata
-
-        This is the slowest path and the target for optimization.
+        DuckDB 1.5+ writes CRS natively via ST_SetCRS() during COPY TO.
+        Single-pass write — no post-processing file rewrite needed.
         """
         elapsed = measure_conversion_time(
             fields_5070_file,
@@ -89,11 +85,7 @@ class TestV2PerformanceBaseline:
         """
         Baseline: parquet-geo-only conversion with CRS.
 
-        Current implementation:
-        1. DuckDB writes file
-        2. apply_crs_to_parquet() rewrites with CRS in schema
-
-        This is faster than v2.0 with CRS (only 1 rewrite, not 2).
+        DuckDB 1.5+ writes CRS natively via ST_SetCRS() during COPY TO.
         """
         elapsed = measure_conversion_time(
             fields_5070_file,
@@ -273,15 +265,33 @@ class TestFileSize:
         for version, size in sizes.items():
             print(f"  {version:20s}: {size:,} bytes ({size / 1024:.1f} KB)")
 
-        # All versions should produce similar file sizes
-        # (main difference is metadata, which is small)
-        max_size = max(sizes.values())
-        min_size = min(sizes.values())
-        variance = (max_size - min_size) / min_size
+        # DuckDB 1.5+ native geometry shredding compresses v2.0/parquet-geo-only
+        # ~30% smaller than v1.x WKB blobs. Split assertions to distinguish
+        # expected cross-encoding variance from unexpected regressions.
 
-        # Note: Variance threshold increased to 25% because with smaller test files
-        # (100 rows), metadata overhead is proportionally larger
-        assert variance < 0.25, f"File size variance {variance:.1%} exceeds 25%"
+        # 1. Expected: v2/parquet-geo-only should be smaller than v1.x (shredding benefit)
+        v1_sizes = [s for v, s in sizes.items() if v in ("1.0", "1.1")]
+        v2_sizes = [s for v, s in sizes.items() if v in ("2.0", "parquet-geo-only")]
+        if v1_sizes and v2_sizes:
+            avg_v1 = sum(v1_sizes) / len(v1_sizes)
+            avg_v2 = sum(v2_sizes) / len(v2_sizes)
+            if avg_v1 > 0:
+                improvement = (avg_v1 - avg_v2) / avg_v1
+                assert improvement > 0.10, (
+                    f"Expected v2 to be smaller than v1 due to geometry shredding, "
+                    f"but improvement is only {improvement:.1%}"
+                )
+                assert improvement < 0.60, (
+                    f"v2 is {improvement:.1%} smaller than v1 — unexpectedly large difference"
+                )
+
+        # 2. Same-encoding versions should not vary much (catches regressions)
+        for label, group in [("v1.x", v1_sizes), ("v2/pgo", v2_sizes)]:
+            if len(group) >= 2:
+                group_variance = (max(group) - min(group)) / min(group)
+                assert group_variance < 0.15, (
+                    f"{label} same-encoding variance {group_variance:.1%} exceeds 15%"
+                )
 
 
 @pytest.mark.skip(reason="File I/O monitoring requires platform-specific tools")

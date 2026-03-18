@@ -5,6 +5,8 @@ import pytest
 from geoparquet_io.core.common import (
     _extract_crs_identifier,
     _get_geometry_type_name,
+    _validate_projjson,
+    _wrap_query_with_crs,
     calculate_row_group_size,
     check_bbox_structure,
     detect_geoparquet_file_type,
@@ -855,6 +857,82 @@ class TestIsDefaultCrs:
 
         assert is_default_crs({"id": {"authority": "EPSG", "code": 3857}}) is False
         assert is_default_crs("EPSG:32610") is False
+
+
+class TestWrapQueryWithCrs:
+    """Tests for _wrap_query_with_crs shared helper."""
+
+    SAMPLE_CRS = {
+        "$schema": "https://proj.org/schemas/v0.5/projjson.schema.json",
+        "type": "ProjectedCRS",
+        "name": "NAD83 / Conus Albers",
+        "id": {"authority": "EPSG", "code": 5070},
+    }
+
+    def test_returns_original_query_when_no_crs(self):
+        query = "SELECT * FROM tbl"
+        assert _wrap_query_with_crs(query, "geometry", None) == query
+
+    def test_returns_original_query_when_default_crs(self):
+        query = "SELECT * FROM tbl"
+        default_crs = {"id": {"authority": "EPSG", "code": 4326}}
+        assert _wrap_query_with_crs(query, "geometry", default_crs) == query
+
+    def test_wraps_query_with_non_default_crs(self):
+        query = "SELECT * FROM tbl"
+        result = _wrap_query_with_crs(query, "geometry", self.SAMPLE_CRS)
+        assert "ST_SetCRS" in result
+        assert '"geometry"' in result
+        assert "FROM (SELECT * FROM tbl)" in result
+
+    def test_raises_when_geometry_column_is_none(self):
+        query = "SELECT * FROM tbl"
+        with pytest.raises(ValueError, match="geometry_column is required"):
+            _wrap_query_with_crs(query, None, self.SAMPLE_CRS)
+
+    def test_escapes_column_name_with_quotes(self):
+        query = "SELECT * FROM tbl"
+        result = _wrap_query_with_crs(query, 'my"geom', self.SAMPLE_CRS)
+        assert 'my""geom' in result
+
+    def test_nested_replace_with_crs(self):
+        """Verify CRS wrapping works on queries that already use SELECT * REPLACE."""
+        inner_query = "SELECT * REPLACE (upper(name) AS name) FROM tbl"
+        result = _wrap_query_with_crs(inner_query, "geometry", self.SAMPLE_CRS)
+        assert "ST_SetCRS" in result
+        assert inner_query in result
+
+    def test_rejects_invalid_projjson(self):
+        query = "SELECT * FROM tbl"
+        invalid_crs = {"not_a_real": "projjson"}
+        result = _wrap_query_with_crs(query, "geometry", invalid_crs)
+        assert result == query  # Returns unchanged
+
+
+class TestValidateProjjson:
+    """Tests for _validate_projjson."""
+
+    def test_valid_projjson_with_schema(self):
+        crs = {
+            "$schema": "https://proj.org/schemas/v0.5/projjson.schema.json",
+            "type": "ProjectedCRS",
+        }
+        assert _validate_projjson(crs) is True
+
+    def test_valid_projjson_with_type(self):
+        crs = {"type": "GeographicCRS", "name": "WGS 84"}
+        assert _validate_projjson(crs) is True
+
+    def test_valid_projjson_with_id_only(self):
+        crs = {"id": {"authority": "EPSG", "code": 5070}}
+        assert _validate_projjson(crs) is True
+
+    def test_rejects_non_dict(self):
+        assert _validate_projjson("EPSG:4326") is False
+        assert _validate_projjson(None) is False
+
+    def test_rejects_dict_without_expected_keys(self):
+        assert _validate_projjson({"name": "'; DROP TABLE foo; --"}) is False
 
 
 class TestCalculateRowGroupSize:

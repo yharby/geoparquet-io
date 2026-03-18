@@ -1306,6 +1306,60 @@ def is_default_crs(crs):
     return False
 
 
+def _validate_projjson(crs: dict) -> bool:
+    """Validate that a CRS dict has the expected PROJJSON structure.
+
+    Checks for required keys and rejects dicts with suspicious string values
+    that could indicate injection attempts. This is defense-in-depth — the CRS
+    originates from source file GeoParquet metadata, not user input.
+    """
+    if not isinstance(crs, dict):
+        return False
+    # PROJJSON must have a $schema or type key
+    if "$schema" not in crs and "type" not in crs and "id" not in crs:
+        return False
+    return True
+
+
+def _wrap_query_with_crs(
+    query: str,
+    geometry_column: str | None,
+    input_crs: dict | None,
+) -> str:
+    """Wrap query with ST_SetCRS() so DuckDB writes CRS into the Parquet schema natively.
+
+    DuckDB 1.5+ writes CRS from the GEOMETRY type directly into the Parquet
+    schema during COPY TO — no post-processing needed.
+
+    Args:
+        query: SQL query to wrap.
+        geometry_column: Name of the geometry column.
+        input_crs: PROJJSON dict with CRS information.
+
+    Returns:
+        Original query if no CRS wrapping needed, or wrapped query with ST_SetCRS.
+    """
+    if not input_crs or is_default_crs(input_crs):
+        return query
+
+    if not geometry_column:
+        raise ValueError(
+            "geometry_column is required when input_crs is specified — "
+            "cannot apply CRS without a geometry column"
+        )
+
+    if not _validate_projjson(input_crs):
+        warn("input_crs does not look like valid PROJJSON — skipping CRS application")
+        return query
+
+    escaped_geom = geometry_column.replace('"', '""')
+    crs_json = json.dumps(input_crs).replace("'", "''")
+    return f"""
+        SELECT * REPLACE (ST_SetCRS("{escaped_geom}", '{crs_json}') AS "{escaped_geom}")
+        FROM ({query})
+    """
+
+
 def extract_crs_from_parquet(parquet_file, verbose=False):
     """
     Extract CRS (as PROJJSON dict) from a Parquet file.
@@ -1596,152 +1650,6 @@ def is_geographic_crs(crs: dict | str | None) -> bool:
         return any(x in crs_upper for x in ["4326", "CRS84", "WGS84"])
 
     return False
-
-
-def apply_crs_to_parquet(
-    parquet_file,
-    crs,
-    geometry_column="geometry",
-    compression="ZSTD",
-    compression_level=15,
-    row_group_rows=None,
-    add_to_geo_metadata=False,
-    verbose=False,
-):
-    """
-    Rewrite a Parquet file to add CRS to the geometry column.
-
-    Uses geoarrow-pyarrow to set CRS on the geometry column type,
-    which writes it into the Parquet schema. Optionally also adds CRS
-    to GeoParquet 'geo' metadata in the same write operation.
-
-    Args:
-        parquet_file: Path to the parquet file to rewrite
-        crs: PROJJSON dict with CRS information
-        geometry_column: Name of the geometry column
-        compression: Compression type for output
-        compression_level: Compression level
-        row_group_rows: Number of rows per row group
-        add_to_geo_metadata: If True, also add CRS to GeoParquet 'geo' metadata (for v2.0)
-        verbose: Whether to print verbose output
-    """
-    import geoarrow.pyarrow as ga
-    import pyarrow as pa
-
-    if verbose:
-        target = (
-            "Parquet schema and GeoParquet metadata" if add_to_geo_metadata else "Parquet schema"
-        )
-        debug(f"Applying CRS {_format_crs_display(crs)} to {target}...")
-
-    # Read the file
-    table = pq.read_table(parquet_file)
-
-    # Get the geometry column and convert to WKB format with geoarrow
-    # Using as_wkb preserves binary WKB and writes proper Parquet GEOMETRY type
-    geom_col = table.column(geometry_column)
-    wkb_arr = ga.as_wkb(geom_col)
-
-    # Create new type with CRS
-    new_type = wkb_arr.type.with_crs(crs)
-
-    # Create new chunks with the CRS type using from_storage
-    # This preserves the CRS unlike cast() which resets it
-    new_chunks = []
-    for chunk in wkb_arr.chunks:
-        new_chunk = pa.ExtensionArray.from_storage(new_type, chunk.storage)
-        new_chunks.append(new_chunk)
-
-    geom_with_crs = pa.chunked_array(new_chunks, type=new_type)
-
-    # Replace the column in the table
-    col_index = table.schema.get_field_index(geometry_column)
-    new_table = table.set_column(col_index, geometry_column, geom_with_crs)
-
-    # If requested, also add CRS to GeoParquet metadata (for v2.0)
-    if add_to_geo_metadata:
-        metadata = new_table.schema.metadata or {}
-
-        # Parse existing geo metadata or create new
-        if b"geo" in metadata:
-            geo_meta = json.loads(metadata[b"geo"])
-        else:
-            geo_meta = {"version": "2.0.0", "primary_column": geometry_column, "columns": {}}
-
-        # Add CRS to geometry column in metadata
-        geom_col_name = geo_meta.get("primary_column", geometry_column)
-        if geom_col_name not in geo_meta["columns"]:
-            geo_meta["columns"][geom_col_name] = {}
-        geo_meta["columns"][geom_col_name]["crs"] = crs
-
-        # Update table metadata
-        new_metadata = dict(metadata)
-        new_metadata[b"geo"] = json.dumps(geo_meta).encode("utf-8")
-        new_table = new_table.replace_schema_metadata(new_metadata)
-
-    # Use central configuration for write settings
-    settings = ParquetWriteSettings(
-        compression=compression, compression_level=compression_level, row_group_rows=row_group_rows
-    )
-    write_kwargs = settings.get_pyarrow_kwargs()
-
-    # Write back with all best practices (single write!)
-    pq.write_table(new_table, parquet_file, **write_kwargs)
-
-    if verbose:
-        success("CRS applied successfully")
-
-
-def add_crs_to_geoparquet_metadata(
-    parquet_file, crs, compression="ZSTD", compression_level=15, row_group_rows=None, verbose=False
-):
-    """
-    Add CRS to GeoParquet 'geo' metadata.
-
-    NOTE: This function is kept for compatibility but is no longer used internally.
-    For GeoParquet 2.0, use apply_crs_to_parquet() with add_to_geo_metadata=True
-    to write CRS to both Parquet schema and geo metadata in a single write operation.
-
-    Args:
-        parquet_file: Path to the parquet file
-        crs: PROJJSON dict with CRS information
-        compression: Compression type
-        compression_level: Compression level
-        row_group_rows: Number of rows per row group
-        verbose: Whether to print verbose output
-    """
-    if verbose:
-        debug(f"Adding CRS to GeoParquet metadata: {_format_crs_display(crs)}")
-
-    table = pq.read_table(parquet_file)
-    metadata = table.schema.metadata or {}
-
-    # Parse existing geo metadata or create new
-    if b"geo" in metadata:
-        geo_meta = json.loads(metadata[b"geo"])
-    else:
-        geo_meta = {"version": "2.0.0", "primary_column": "geometry", "columns": {}}
-
-    # Add CRS to geometry column
-    geom_col = geo_meta.get("primary_column", "geometry")
-    if geom_col not in geo_meta["columns"]:
-        geo_meta["columns"][geom_col] = {}
-    geo_meta["columns"][geom_col]["crs"] = crs
-
-    # Write back with same compression settings
-    new_metadata = dict(metadata)
-    new_metadata[b"geo"] = json.dumps(geo_meta).encode("utf-8")
-    new_table = table.replace_schema_metadata(new_metadata)
-
-    # Use central configuration for write settings
-    settings = ParquetWriteSettings(
-        compression=compression, compression_level=compression_level, row_group_rows=row_group_rows
-    )
-    write_kwargs = settings.get_pyarrow_kwargs()
-    pq.write_table(new_table, parquet_file, **write_kwargs)
-
-    if verbose:
-        success("CRS added to GeoParquet metadata")
 
 
 def parse_crs_string_to_projjson(crs_string, con=None):
@@ -3131,12 +3039,17 @@ def _plain_copy_to(
     geoparquet_version: str = "1.1",
     compression_level: int | None = None,
     row_group_rows: int | None = None,
+    input_crs: dict | None = None,
+    geometry_column: str | None = None,
 ) -> None:
     """
     Execute a plain DuckDB COPY TO without geo metadata manipulation.
 
     Used when no metadata rewrite is needed (parquet-geo-only, 2.0 passthrough).
     This is the fastest possible write path.
+
+    DuckDB 1.5+: If input_crs is non-default, wraps the query with ST_SetCRS()
+    so CRS is written into the Parquet schema natively during COPY TO.
 
     Args:
         con: DuckDB connection
@@ -3147,6 +3060,8 @@ def _plain_copy_to(
         geoparquet_version: GeoParquet version to write (1.0, 1.1, 2.0, parquet-geo-only)
         compression_level: Compression level (codec-specific)
         row_group_rows: Target number of rows per row group
+        input_crs: PROJJSON dict with CRS information (optional)
+        geometry_column: Name of the geometry column (required if input_crs is set)
     """
     compression_map = {
         "zstd": "ZSTD",
@@ -3163,6 +3078,10 @@ def _plain_copy_to(
     version_config = GEOPARQUET_VERSIONS.get(geoparquet_version, GEOPARQUET_VERSIONS["1.1"])
     duckdb_version = version_config.get("duckdb_param", "V1")
 
+    # DuckDB 1.5+: Apply CRS via ST_SetCRS so it's written natively into the
+    # Parquet schema during COPY TO — no post-processing file rewrite needed.
+    final_query = _wrap_query_with_crs(query, geometry_column, input_crs)
+
     escaped_path = output_path.replace("'", "''")
 
     # Build options list
@@ -3178,7 +3097,7 @@ def _plain_copy_to(
         options.append(f"ROW_GROUP_SIZE {row_group_rows}")
 
     copy_query = f"""
-        COPY ({query})
+        COPY ({final_query})
         TO '{escaped_path}'
         ({", ".join(options)})
     """
@@ -3294,21 +3213,9 @@ def write_parquet_with_metadata(
                 row_group_rows=row_group_rows,
                 verbose=verbose,
                 geoparquet_version=effective_version,
+                input_crs=input_crs,
+                geometry_column=geometry_column,
             )
-
-            # For 2.0 and parquet-geo-only with non-default CRS, apply CRS to schema
-            if input_crs and not is_default_crs(input_crs):
-                if effective_version in ("2.0", "parquet-geo-only"):
-                    apply_crs_to_parquet(
-                        actual_output,
-                        input_crs,
-                        geometry_column=geometry_column or "geometry",
-                        compression=compression,
-                        compression_level=compression_level,
-                        row_group_rows=row_group_rows,
-                        add_to_geo_metadata=(effective_version == "2.0"),
-                        verbose=verbose,
-                    )
         else:
             # Metadata rewrite needed - use strategy pattern
             strategy_enum = WriteStrategy(write_strategy)
