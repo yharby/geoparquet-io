@@ -14,6 +14,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -498,31 +499,19 @@ class TestNoGeometryConversions:
         captured = capfd.readouterr()
         assert "no geometry" in captured.err.lower() or "no geometry" in captured.out.lower()
 
-    def test_geojson_no_geometry_outputs_json(self, plain_parquet, tmp_path, capfd):
-        """Test GeoJSON outputs plain JSON when no geometry, with warning."""
+    def test_geojson_no_geometry_raises_error(self, plain_parquet, tmp_path):
+        """Test GeoJSON export errors when no geometry is present."""
         output_file = tmp_path / "output.json"
 
-        write_geojson(
-            input_path=plain_parquet,
-            output_path=str(output_file),
-            verbose=False,
-        )
-
-        # Should warn it's not valid GeoJSON
-        captured = capfd.readouterr()
-        assert (
-            "not valid geojson" in captured.err.lower()
-            or "not valid geojson" in captured.out.lower()
-            or "standard json" in captured.err.lower()
-            or "standard json" in captured.out.lower()
-        )
-
-        # Output should be valid JSON
-        import json
-
-        with open(output_file) as f:
-            data = json.load(f)
-        assert isinstance(data, (list, dict))
+        # Should raise error about missing geometry
+        with pytest.raises(
+            click.ClickException, match="Cannot export to GeoJSON.*no geometry column"
+        ):
+            write_geojson(
+                input_path=plain_parquet,
+                output_path=str(output_file),
+                verbose=False,
+            )
 
     def test_case_insensitive_geometry_detection(self, tmp_path):
         """Test that geometry columns are detected case-insensitively."""

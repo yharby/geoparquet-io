@@ -1094,6 +1094,11 @@ def convert(ctx):
     is_flag=True,
     help="CSV/TSV: Skip rows with invalid geometries instead of failing",
 )
+@click.option(
+    "--allow-no-geometry",
+    is_flag=True,
+    help="Allow conversion to plain Parquet when no geometry column is detected (default: error)",
+)
 @geoparquet_version_option
 @verbose_option
 @output_format_options
@@ -1110,6 +1115,7 @@ def convert_to_geoparquet_cmd(
     delimiter,
     crs,
     skip_invalid,
+    allow_no_geometry,
     geoparquet_version,
     verbose,
     compression,
@@ -1168,6 +1174,7 @@ def convert_to_geoparquet_cmd(
             delimiter=delimiter,
             crs=crs,
             skip_invalid=skip_invalid,
+            allow_no_geometry=allow_no_geometry,
             profile=aws_profile,
             geoparquet_version=geoparquet_version,
             compression=compression,
@@ -1191,6 +1198,7 @@ def convert_to_geoparquet_cmd(
             delimiter=delimiter,
             crs=crs,
             skip_invalid=skip_invalid,
+            allow_no_geometry=allow_no_geometry,
             profile=aws_profile,
             geoparquet_version=geoparquet_version,
         )
@@ -1205,6 +1213,7 @@ def _convert_streaming(
     delimiter,
     crs,
     skip_invalid,
+    allow_no_geometry,
     profile,
     geoparquet_version,
     compression="ZSTD",
@@ -1229,6 +1238,7 @@ def _convert_streaming(
             str(temp_path),
             skip_hilbert=skip_hilbert,
             verbose=False,
+            allow_no_geometry=allow_no_geometry,
             compression=compression,
             compression_level=compression_level,
             row_group_rows=row_group_rows,

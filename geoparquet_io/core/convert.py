@@ -1101,6 +1101,7 @@ def convert_to_geoparquet(
     delimiter=None,
     crs="EPSG:4326",
     skip_invalid=False,
+    allow_no_geometry=False,
     profile=None,
     geoparquet_version=None,
 ):
@@ -1129,6 +1130,7 @@ def convert_to_geoparquet(
         delimiter: CSV/TSV only - Delimiter character (auto-detected if not specified)
         crs: CRS for geometry data (default: EPSG:4326/WGS84)
         skip_invalid: Skip rows with invalid geometries instead of failing
+        allow_no_geometry: Allow conversion to plain Parquet if no geometry detected
         profile: AWS profile name for S3 operations
         geoparquet_version: GeoParquet version to write (1.0, 1.1, 2.0, parquet-geo-only)
 
@@ -1182,9 +1184,23 @@ def convert_to_geoparquet(
                 geoparquet_version=geoparquet_version,
             )
 
-        # No geometry detected — convert as plain optimized Parquet
+        # No geometry detected — error unless explicitly allowed
         has_geometry = query is not None
         if not has_geometry:
+            if not allow_no_geometry:
+                raise click.ClickException(
+                    "No geometry column detected in input file. "
+                    "Expected column named 'geom', 'geometry', 'wkb_geometry', or 'shape'. "
+                    "Use --allow-no-geometry to convert as plain Parquet without GeoParquet metadata."
+                )
+
+            # Error if Hilbert sorting was requested but no geometry found
+            if not skip_hilbert:
+                raise click.ClickException(
+                    "Cannot apply Hilbert sorting - no geometry column found. "
+                    "Use --skip-hilbert if you want to convert without spatial indexing."
+                )
+
             warn(
                 "No geometry column detected. "
                 "Converting as plain Parquet without GeoParquet metadata."

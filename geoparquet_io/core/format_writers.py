@@ -465,47 +465,12 @@ def write_geojson(
     has_geometry = any(col in column_names_lower for col in GEOMETRY_COLUMNS)
 
     if not has_geometry:
-        # No geometry - output as plain JSON array with warning
-        warn(
-            "No geometry column found. Output will be standard JSON (not valid GeoJSON). "
-            "The file will contain a JSON array of records."
+        # Reject GeoJSON export without geometry data
+        raise click.ClickException(
+            "Cannot export to GeoJSON: no geometry column found. "
+            "GeoJSON requires geometry data. Expected column named 'geom', 'geometry', 'wkb_geometry', or 'shape'. "
+            "To export data without geometry, use CSV format instead: gpio convert input.parquet output.csv"
         )
-        progress(f"Converting to JSON: {output_path}")
-
-        try:
-            con = get_duckdb_connection(load_spatial=True, load_httpfs=needs_httpfs(input_path))
-            try:
-                safe_input_url = input_url.replace("'", "''")
-                safe_output_path = output_path.replace("'", "''")
-
-                # Build column list, JSON-encoding complex types
-                select_cols = []
-                for field in schema:
-                    if (
-                        pa.types.is_struct(field.type)
-                        or pa.types.is_list(field.type)
-                        or pa.types.is_map(field.type)
-                    ):
-                        select_cols.append(f'to_json("{field.name}") as "{field.name}"')
-                    else:
-                        select_cols.append(f'"{field.name}"')
-
-                select_clause = ", ".join(select_cols)
-
-                query = f"""
-                    COPY (SELECT {select_clause} FROM read_parquet('{safe_input_url}'))
-                    TO '{safe_output_path}'
-                    WITH (FORMAT JSON, ARRAY true)
-                """
-                debug(f"Executing: {query}")
-                con.execute(query)
-            finally:
-                con.close()
-
-            success(f"Created JSON: {output_path}")
-            return output_path
-        except Exception as e:
-            raise click.ClickException(f"Failed to create JSON: {str(e)}") from e
 
     progress(f"Converting to GeoJSON: {output_path}")
 

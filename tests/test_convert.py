@@ -13,6 +13,7 @@ Tests verify that convert applies all best practices:
 import os
 import sys
 
+import click
 import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -894,8 +895,10 @@ class TestConvertNoGeometry:
         return path
 
     def test_convert_parquet_no_geometry(self, plain_parquet_input, temp_output_file):
-        """Parquet without geometry should convert to plain optimized Parquet."""
-        convert_to_geoparquet(plain_parquet_input, temp_output_file)
+        """Parquet without geometry should convert to plain optimized Parquet with --allow-no-geometry."""
+        convert_to_geoparquet(
+            plain_parquet_input, temp_output_file, allow_no_geometry=True, skip_hilbert=True
+        )
 
         assert os.path.exists(temp_output_file)
 
@@ -921,8 +924,10 @@ class TestConvertNoGeometry:
         assert geo_meta is None, "Expected no GeoParquet metadata for plain file"
 
     def test_convert_csv_no_geometry(self, plain_csv_input, temp_output_file):
-        """CSV without geometry should convert to plain optimized Parquet."""
-        convert_to_geoparquet(plain_csv_input, temp_output_file)
+        """CSV without geometry should convert to plain optimized Parquet with --allow-no-geometry."""
+        convert_to_geoparquet(
+            plain_csv_input, temp_output_file, allow_no_geometry=True, skip_hilbert=True
+        )
 
         assert os.path.exists(temp_output_file)
 
@@ -945,24 +950,35 @@ class TestConvertNoGeometry:
         assert geo_meta is None
 
     def test_convert_no_geometry_cli_warns(self, plain_parquet_input, temp_output_file):
-        """CLI should warn about missing geometry and succeed."""
+        """CLI should warn about missing geometry and succeed with --allow-no-geometry."""
         runner = CliRunner()
-        result = runner.invoke(cli, ["convert", plain_parquet_input, temp_output_file])
+        result = runner.invoke(
+            cli,
+            [
+                "convert",
+                plain_parquet_input,
+                temp_output_file,
+                "--allow-no-geometry",
+                "--skip-hilbert",
+            ],
+        )
 
         assert result.exit_code == 0, f"Command failed: {result.output}"
         assert os.path.exists(temp_output_file)
         assert "no geometry column" in result.output.lower()
 
-    def test_convert_no_geometry_skips_hilbert(self, plain_parquet_input, temp_output_file):
-        """No-geometry file with skip_hilbert=False should not error."""
-        # skip_hilbert defaults to False, so this exercises the no-geometry path
-        convert_to_geoparquet(plain_parquet_input, temp_output_file, skip_hilbert=False)
+    def test_convert_no_geometry_requires_skip_hilbert(self, plain_parquet_input, temp_output_file):
+        """No-geometry file with skip_hilbert=False should error."""
+        # When allow_no_geometry is True but skip_hilbert is False, should error
+        with pytest.raises(click.ClickException, match="Cannot apply Hilbert sorting"):
+            convert_to_geoparquet(
+                plain_parquet_input, temp_output_file, allow_no_geometry=True, skip_hilbert=False
+            )
 
-        assert os.path.exists(temp_output_file)
-        con = duckdb.connect()
-        count = con.execute(f"SELECT COUNT(*) FROM '{temp_output_file}'").fetchone()[0]
-        assert count == 5
-        con.close()
+    def test_convert_no_geometry_errors_without_flag(self, plain_parquet_input, temp_output_file):
+        """No-geometry file without --allow-no-geometry should error."""
+        with pytest.raises(click.ClickException, match="No geometry column detected"):
+            convert_to_geoparquet(plain_parquet_input, temp_output_file)
 
     def test_convert_with_geometry_still_works(self, shapefile_input, temp_output_file):
         """Regression guard: files with geometry still produce GeoParquet."""
