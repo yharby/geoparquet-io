@@ -222,12 +222,7 @@ uv run xenon --max-absolute=A geoparquet_io/  # Aim for A grade
 - Dictionary dispatch over long if-elif
 - Max 30-40 lines per function
 
-**Prefer `pathlib.Path` over `os.path`:**
-- Use `Path(p).exists()` not `os.path.exists(p)`
-- Use `Path(p).parent` not `os.path.dirname(p)`
-- Use `Path(p).name` not `os.path.basename(p)`
-- Use `Path(p) / "child"` not `os.path.join(p, "child")`
-- Exception: `os.path` is acceptable when interfacing with APIs that require strings
+- Prefer `pathlib.Path` over `os.path` for new code; use `str(path)` when APIs require strings
 
 ---
 
