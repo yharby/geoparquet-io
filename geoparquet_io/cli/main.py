@@ -1,3 +1,4 @@
+import os
 from importlib.metadata import entry_points
 from pathlib import Path
 
@@ -1093,6 +1094,11 @@ def convert(ctx):
     is_flag=True,
     help="CSV/TSV: Skip rows with invalid geometries instead of failing",
 )
+@click.option(
+    "--allow-no-geometry",
+    is_flag=True,
+    help="Allow conversion to plain Parquet when no geometry column is detected (default: error)",
+)
 @geoparquet_version_option
 @verbose_option
 @output_format_options
@@ -1109,6 +1115,7 @@ def convert_to_geoparquet_cmd(
     delimiter,
     crs,
     skip_invalid,
+    allow_no_geometry,
     geoparquet_version,
     verbose,
     compression,
@@ -1167,6 +1174,7 @@ def convert_to_geoparquet_cmd(
             delimiter=delimiter,
             crs=crs,
             skip_invalid=skip_invalid,
+            allow_no_geometry=allow_no_geometry,
             profile=aws_profile,
             geoparquet_version=geoparquet_version,
             compression=compression,
@@ -1190,6 +1198,7 @@ def convert_to_geoparquet_cmd(
             delimiter=delimiter,
             crs=crs,
             skip_invalid=skip_invalid,
+            allow_no_geometry=allow_no_geometry,
             profile=aws_profile,
             geoparquet_version=geoparquet_version,
         )
@@ -1204,6 +1213,7 @@ def _convert_streaming(
     delimiter,
     crs,
     skip_invalid,
+    allow_no_geometry,
     profile,
     geoparquet_version,
     compression="ZSTD",
@@ -1228,6 +1238,7 @@ def _convert_streaming(
             str(temp_path),
             skip_hilbert=skip_hilbert,
             verbose=False,
+            allow_no_geometry=allow_no_geometry,
             compression=compression,
             compression_level=compression_level,
             row_group_rows=row_group_rows,
@@ -1382,6 +1393,7 @@ def convert_reproject(
 @convert.command(name="geojson", cls=SingleFileCommand)
 @click.argument("input_file")
 @click.argument("output_file", type=click.Path(), required=False, default=None)
+@overwrite_option
 @click.option(
     "--no-rs",
     is_flag=True,
@@ -1432,6 +1444,7 @@ def convert_reproject(
 def convert_geojson(
     input_file,
     output_file,
+    overwrite,
     no_rs,
     precision,
     write_bbox,
@@ -1479,6 +1492,7 @@ def convert_geojson(
     for RFC 7946 compliance. Use --keep-crs to preserve the original CRS.
     """
     from geoparquet_io.core.common import validate_profile_for_urls
+    from geoparquet_io.core.format_writers import write_geojson
     from geoparquet_io.core.geojson_stream import convert_to_geojson
 
     configure_verbose(verbose)
@@ -1487,23 +1501,37 @@ def convert_geojson(
     validate_profile_for_urls(aws_profile, input_file, output_file)
 
     try:
-        feature_count = convert_to_geojson(
-            input_path=input_file,
-            output_path=output_file,
-            rs=not no_rs,
-            precision=precision,
-            write_bbox=write_bbox,
-            id_field=id_field,
-            description=description,
-            seq=not no_seq,
-            pretty=pretty,
-            verbose=verbose,
-            profile=aws_profile,
-            keep_crs=keep_crs,
-        )
-
         if output_file:
-            click.echo(f"Converted {feature_count:,} features to {output_file}")
+            # File mode - use write_geojson which handles no-geometry case
+            write_geojson(
+                input_path=input_file,
+                output_path=output_file,
+                precision=precision,
+                write_bbox=write_bbox,
+                id_field=id_field,
+                description=description,
+                pretty=pretty,
+                keep_crs=keep_crs,
+                overwrite=overwrite,
+                verbose=verbose,
+                profile=aws_profile,
+            )
+        else:
+            # Streaming mode - use convert_to_geojson directly
+            convert_to_geojson(
+                input_path=input_file,
+                output_path=output_file,
+                rs=not no_rs,
+                precision=precision,
+                write_bbox=write_bbox,
+                id_field=id_field,
+                description=description,
+                seq=not no_seq,
+                pretty=pretty,
+                verbose=verbose,
+                profile=aws_profile,
+                keep_crs=keep_crs,
+            )
     except Exception as e:
         raise click.ClickException(str(e)) from e
 
@@ -1574,12 +1602,14 @@ def convert_geopackage(
 @convert.command(name="flatgeobuf", cls=SingleFileCommand)
 @click.argument("input_file")
 @click.argument("output_file", type=click.Path(), required=False, default=None)
+@overwrite_option
 @verbose_option
 @aws_profile_option
 @show_sql_option
 def convert_flatgeobuf(
     input_file,
     output_file,
+    overwrite,
     verbose,
     aws_profile,
     show_sql,
@@ -1611,6 +1641,7 @@ def convert_flatgeobuf(
         write_flatgeobuf(
             input_path=input_file,
             output_path=output_file,
+            overwrite=overwrite,
             verbose=verbose,
             profile=aws_profile,
         )
@@ -1621,6 +1652,7 @@ def convert_flatgeobuf(
 @convert.command(name="csv", cls=SingleFileCommand)
 @click.argument("input_file")
 @click.argument("output_file", type=click.Path(), required=False, default=None)
+@overwrite_option
 @click.option(
     "--no-wkt",
     is_flag=True,
@@ -1637,6 +1669,7 @@ def convert_flatgeobuf(
 def convert_csv(
     input_file,
     output_file,
+    overwrite,
     no_wkt,
     no_bbox,
     verbose,
@@ -1677,6 +1710,7 @@ def convert_csv(
             output_path=output_file,
             include_wkt=not no_wkt,
             include_bbox=not no_bbox,
+            overwrite=overwrite,
             verbose=verbose,
             profile=aws_profile,
         )
@@ -1795,10 +1829,60 @@ def inspect(ctx):
     setup_cli_logging(verbose=False, show_timestamps=timestamps)
 
 
+def _validate_parquet_input(file_path: str) -> None:
+    """Validate that input file appears to be a Parquet file.
+
+    Args:
+        file_path: Path to the file (local or remote)
+
+    Raises:
+        click.ClickException: If file doesn't have .parquet extension
+    """
+    # Skip validation for directories (partition paths)
+    if os.path.isdir(file_path):
+        return
+
+    # Extract filename from path (handles both local and remote URLs)
+    if "://" in file_path:
+        # Use urllib.parse to properly handle URLs with query strings (e.g., presigned URLs)
+        from urllib.parse import urlparse
+
+        parsed = urlparse(file_path)
+        filename = os.path.basename(parsed.path)
+    else:
+        filename = os.path.basename(file_path)
+
+    # Check extension (case-insensitive)
+    _, ext = os.path.splitext(filename)
+    if ext.lower() != ".parquet":
+        raise click.ClickException(
+            f"The 'inspect' command only works with Parquet files, "
+            f"but got '{filename}' with extension '{ext or '(none)'}'. "
+            f"Use 'gpio convert' to convert other formats to GeoParquet first."
+        )
+
+
+def _friendly_parquet_error(error: Exception, file_path: str) -> click.ClickException:
+    """Convert low-level Parquet errors to user-friendly messages."""
+    error_str = str(error)
+    filename = os.path.basename(file_path)
+
+    if "magic bytes" in error_str.lower() or "not a parquet file" in error_str.lower():
+        return click.ClickException(
+            f"The file '{filename}' has a .parquet extension but is not a valid "
+            f"Parquet file. It may be a different format (CSV, JSON, etc.) that was "
+            f"incorrectly named. Check the file contents or use 'gpio convert' to "
+            f"create a proper GeoParquet file."
+        )
+    return click.ClickException(error_str)
+
+
 def _inspect_summary_impl(parquet_file, json_output, markdown_output, check_all_files):
     """CLI wrapper for inspect summary - delegates to core function."""
     if json_output and markdown_output:
         raise click.UsageError("--json and --markdown are mutually exclusive")
+
+    _validate_parquet_input(parquet_file)
 
     try:
         result = _inspect_summary_core(parquet_file, check_all_files)
@@ -1815,13 +1899,15 @@ def _inspect_summary_impl(parquet_file, json_output, markdown_output, check_all_
     except ValueError as e:
         raise click.ClickException(str(e)) from e
     except Exception as e:
-        raise click.ClickException(str(e)) from e
+        raise _friendly_parquet_error(e, parquet_file) from e
 
 
 def _inspect_preview_impl(parquet_file, count, mode, json_output, markdown_output):
     """CLI wrapper for inspect head/tail - delegates to core function."""
     if json_output and markdown_output:
         raise click.UsageError("--json and --markdown are mutually exclusive")
+
+    _validate_parquet_input(parquet_file)
 
     try:
         result = _inspect_preview_core(parquet_file, count, mode)
@@ -1836,13 +1922,15 @@ def _inspect_preview_impl(parquet_file, count, mode, json_output, markdown_outpu
             click.echo(output)
 
     except Exception as e:
-        raise click.ClickException(str(e)) from e
+        raise _friendly_parquet_error(e, parquet_file) from e
 
 
 def _inspect_stats_impl(parquet_file, json_output, markdown_output):
     """CLI wrapper for inspect stats - delegates to core function."""
     if json_output and markdown_output:
         raise click.UsageError("--json and --markdown are mutually exclusive")
+
+    _validate_parquet_input(parquet_file)
 
     try:
         result = _inspect_stats_core(parquet_file)
@@ -1857,7 +1945,7 @@ def _inspect_stats_impl(parquet_file, json_output, markdown_output):
             click.echo(output)
 
     except Exception as e:
-        raise click.ClickException(str(e)) from e
+        raise _friendly_parquet_error(e, parquet_file) from e
 
 
 @inspect.command(name="summary", cls=GlobAwareCommand)
@@ -1973,6 +2061,7 @@ def inspect_meta(
         validate_profile_for_urls,
     )
 
+    _validate_parquet_input(parquet_file)
     validate_profile_for_urls(None, parquet_file)
     setup_aws_profile_if_needed(None, parquet_file)
 
@@ -1986,7 +2075,7 @@ def inspect_meta(
             json_output,
         )
     except Exception as e:
-        raise click.ClickException(str(e)) from e
+        raise _friendly_parquet_error(e, parquet_file) from e
 
 
 # Extract commands group

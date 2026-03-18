@@ -13,7 +13,10 @@ Tests verify that convert applies all best practices:
 import os
 import sys
 
+import click
 import duckdb
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 from click.testing import CliRunner
 
@@ -861,3 +864,152 @@ class TestConvertCSVCLI:
         con.close()
 
         assert row_count == 1445, f"Expected 1445 rows, got {row_count}"
+
+
+class TestConvertNoGeometry:
+    """Test conversion of files without geometry columns."""
+
+    @pytest.fixture
+    def plain_parquet_input(self, tmp_path):
+        """Create a Parquet file without any geometry column."""
+        table = pa.table(
+            {
+                "id": [1, 2, 3, 4, 5],
+                "name": ["a", "b", "c", "d", "e"],
+                "value": [10.0, 20.0, 30.0, 40.0, 50.0],
+            }
+        )
+        path = str(tmp_path / "plain.parquet")
+        pq.write_table(table, path)
+        return path
+
+    @pytest.fixture
+    def plain_csv_input(self, tmp_path):
+        """Create a CSV file without any geometry column."""
+        path = str(tmp_path / "plain.csv")
+        with open(path, "w") as f:
+            f.write("id,name,value\n")
+            f.write("1,a,10.0\n")
+            f.write("2,b,20.0\n")
+            f.write("3,c,30.0\n")
+        return path
+
+    def test_convert_parquet_no_geometry(self, plain_parquet_input, temp_output_file):
+        """Parquet without geometry should convert to plain optimized Parquet with --allow-no-geometry."""
+        convert_to_geoparquet(
+            plain_parquet_input, temp_output_file, allow_no_geometry=True, skip_hilbert=True
+        )
+
+        assert os.path.exists(temp_output_file)
+
+        # Verify same row count
+        con = duckdb.connect()
+        count = con.execute(f"SELECT COUNT(*) FROM '{temp_output_file}'").fetchone()[0]
+        assert count == 5
+
+        # Verify columns preserved (no extra geometry/bbox added)
+        cols = [
+            col[0] for col in con.execute(f"SELECT * FROM '{temp_output_file}' LIMIT 0").description
+        ]
+        assert "id" in cols
+        assert "name" in cols
+        assert "value" in cols
+        assert "geometry" not in cols
+        assert "bbox" not in cols
+        con.close()
+
+        # Verify no geo metadata
+        metadata, _ = get_parquet_metadata(temp_output_file, verbose=False)
+        geo_meta = parse_geo_metadata(metadata, verbose=False)
+        assert geo_meta is None, "Expected no GeoParquet metadata for plain file"
+
+    def test_convert_csv_no_geometry(self, plain_csv_input, temp_output_file):
+        """CSV without geometry should convert to plain optimized Parquet with --allow-no-geometry."""
+        convert_to_geoparquet(
+            plain_csv_input, temp_output_file, allow_no_geometry=True, skip_hilbert=True
+        )
+
+        assert os.path.exists(temp_output_file)
+
+        # Verify data preserved
+        con = duckdb.connect()
+        count = con.execute(f"SELECT COUNT(*) FROM '{temp_output_file}'").fetchone()[0]
+        assert count == 3
+
+        cols = [
+            col[0] for col in con.execute(f"SELECT * FROM '{temp_output_file}' LIMIT 0").description
+        ]
+        assert "id" in cols
+        assert "name" in cols
+        assert "geometry" not in cols
+        con.close()
+
+        # Verify no geo metadata
+        metadata, _ = get_parquet_metadata(temp_output_file, verbose=False)
+        geo_meta = parse_geo_metadata(metadata, verbose=False)
+        assert geo_meta is None
+
+    def test_convert_no_geometry_cli_warns(self, plain_parquet_input, temp_output_file):
+        """CLI should warn about missing geometry and succeed with --allow-no-geometry."""
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "convert",
+                plain_parquet_input,
+                temp_output_file,
+                "--allow-no-geometry",
+                "--skip-hilbert",
+            ],
+        )
+
+        assert result.exit_code == 0, f"Command failed: {result.output}"
+        assert os.path.exists(temp_output_file)
+        assert "no geometry column" in result.output.lower()
+
+    def test_convert_no_geometry_requires_skip_hilbert(self, plain_parquet_input, temp_output_file):
+        """No-geometry file with skip_hilbert=False should error."""
+        # When allow_no_geometry is True but skip_hilbert is False, should error
+        with pytest.raises(click.ClickException, match="Cannot apply Hilbert sorting"):
+            convert_to_geoparquet(
+                plain_parquet_input, temp_output_file, allow_no_geometry=True, skip_hilbert=False
+            )
+
+    def test_convert_no_geometry_errors_without_flag(self, plain_parquet_input, temp_output_file):
+        """No-geometry file without --allow-no-geometry should error."""
+        with pytest.raises(click.ClickException, match="No geometry column detected"):
+            convert_to_geoparquet(plain_parquet_input, temp_output_file)
+
+    def test_convert_with_geometry_still_works(self, shapefile_input, temp_output_file):
+        """Regression guard: files with geometry still produce GeoParquet."""
+        convert_to_geoparquet(shapefile_input, temp_output_file)
+
+        metadata, _ = get_parquet_metadata(temp_output_file, verbose=False)
+        geo_meta = parse_geo_metadata(metadata, verbose=False)
+        assert geo_meta is not None, "Expected GeoParquet metadata for geo file"
+
+    def test_build_plain_select_query_uses_correct_reader(self):
+        """Verify _build_plain_select_query uses correct reader for each file type."""
+        from geoparquet_io.core.convert import _build_plain_select_query
+
+        # Parquet files should use read_parquet
+        parquet_query = _build_plain_select_query("data.parquet", is_parquet=True)
+        assert "read_parquet" in parquet_query
+        assert "read_csv" not in parquet_query
+        assert "ST_Read" not in parquet_query
+
+        # CSV files should use read_csv
+        csv_query = _build_plain_select_query("data.csv", is_csv=True)
+        assert "read_csv" in csv_query
+        assert "read_parquet" not in csv_query
+        assert "ST_Read" not in csv_query
+
+        # Spatial files (non-parquet, non-csv) should use ST_Read
+        geojson_query = _build_plain_select_query("data.geojson", is_parquet=False, is_csv=False)
+        assert "ST_Read" in geojson_query
+        assert "read_csv" not in geojson_query
+        assert "read_parquet" not in geojson_query
+
+        # Shapefile should also use ST_Read
+        shp_query = _build_plain_select_query("data.shp", is_parquet=False, is_csv=False)
+        assert "ST_Read" in shp_query

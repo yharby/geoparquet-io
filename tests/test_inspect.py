@@ -173,6 +173,74 @@ def test_inspect_nonexistent_file(runner):
     assert result.exit_code != 0
 
 
+def test_inspect_non_parquet_file(runner, tmp_path):
+    """Test inspect with non-parquet file gives friendly error."""
+    # Create a CSV file
+    csv_file = tmp_path / "test.csv"
+    csv_file.write_text("id,name\n1,test\n")
+
+    result = runner.invoke(cli, ["inspect", str(csv_file)])
+
+    assert result.exit_code != 0
+    assert "only works with Parquet files" in result.output
+    assert ".csv" in result.output
+
+
+def test_inspect_head_non_parquet_file(runner, tmp_path):
+    """Test inspect head with non-parquet file gives friendly error."""
+    csv_file = tmp_path / "data.geojson"
+    csv_file.write_text('{"type": "FeatureCollection", "features": []}')
+
+    result = runner.invoke(cli, ["inspect", "head", str(csv_file)])
+
+    assert result.exit_code != 0
+    assert "only works with Parquet files" in result.output
+    assert ".geojson" in result.output
+
+
+def test_inspect_stats_non_parquet_file(runner, tmp_path):
+    """Test inspect stats with non-parquet file gives friendly error."""
+    txt_file = tmp_path / "notes.txt"
+    txt_file.write_text("Some notes")
+
+    result = runner.invoke(cli, ["inspect", "stats", str(txt_file)])
+
+    assert result.exit_code != 0
+    assert "only works with Parquet files" in result.output
+    assert ".txt" in result.output
+
+
+def test_inspect_misnamed_parquet_file(runner, tmp_path):
+    """Test inspect with CSV file misnamed as .parquet gives friendly error."""
+    # Create a CSV file with .parquet extension
+    fake_parquet = tmp_path / "data.parquet"
+    fake_parquet.write_text("id,name\n1,test\n2,example\n")
+
+    result = runner.invoke(cli, ["inspect", str(fake_parquet)])
+
+    assert result.exit_code != 0
+    assert "has a .parquet extension but is not a valid Parquet file" in result.output
+    assert "data.parquet" in result.output
+
+
+def test_validate_parquet_input_presigned_url():
+    """Test that presigned URLs with query strings are handled correctly."""
+    from geoparquet_io.cli.main import _validate_parquet_input
+
+    # Presigned URL with .parquet extension should pass validation
+    presigned_url = (
+        "https://bucket.s3.amazonaws.com/data.parquet?X-Amz-Algorithm=AWS4&X-Amz-Signature=abc123"
+    )
+    # Should not raise (parquet extension is correctly detected)
+    _validate_parquet_input(presigned_url)
+
+    # Presigned URL without .parquet should fail
+    presigned_csv = "https://bucket.s3.amazonaws.com/data.csv?X-Amz-Algorithm=AWS4"
+    with pytest.raises(Exception) as exc_info:
+        _validate_parquet_input(presigned_csv)
+    assert "only works with Parquet files" in str(exc_info.value)
+
+
 def test_extract_file_info(test_file):
     """Test extract_file_info function."""
     info = extract_file_info(test_file)

@@ -299,6 +299,7 @@ forbidden_modules = ["geoparquet_io.cli"]
 
 [dependency-groups]
 dev = [
+    "import-linter>=2.11",
     "pytest>=9.0.1",
     "pytest-cov>=7.0.0",
 ]

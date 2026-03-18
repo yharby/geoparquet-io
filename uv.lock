@@ -1203,6 +1203,7 @@ docs = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "import-linter" },
     { name = "pytest" },
     { name = "pytest-cov" },
 ]
@@ -1255,6 +1256,7 @@ provides-extras = ["dev", "docs", "benchmark"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "import-linter", specifier = ">=2.11" },
     { name = "pytest", specifier = ">=9.0.1" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
 ]

@@ -27,7 +27,7 @@ from geoparquet_io.core.common import (
     validate_output_path,
     validate_profile_for_urls,
 )
-from geoparquet_io.core.logging_config import configure_verbose, debug, progress, success
+from geoparquet_io.core.logging_config import configure_verbose, debug, progress, success, warn
 
 # Error message templates for consistency
 ERROR_REMOTE_OUTPUT = "{format} output path must be local. Use upload() for cloud destinations."
@@ -37,6 +37,9 @@ ERROR_NO_GEOMETRY = "No geometry column found. Expected 'geometry', 'geom', or '
 ERROR_NO_COMPATIBLE_COLUMNS = (
     "No compatible columns for {format} format. All columns are complex types (STRUCT, LIST, MAP)."
 )
+
+# Geometry column names to check for
+GEOMETRY_COLUMNS = ["geometry", "geom", "wkb_geometry"]
 
 # Format configuration for GDAL-based writers
 GDAL_FORMATS = {
@@ -49,7 +52,7 @@ GDAL_FORMATS = {
     "flatgeobuf": {
         "driver": "FlatGeobuf",
         "description": "FlatGeobuf",
-        "check_overwrite": False,
+        "check_overwrite": True,
         "layer_option": None,
     },
     "shapefile": {
@@ -208,6 +211,26 @@ def write_gdal_format(
         with fsspec.open(input_url, "rb") as f:
             pf = pq.ParquetFile(f)
             schema = pf.schema_arrow
+
+        # Check for geometry column (case-insensitive)
+        column_names_lower = [field.name.lower() for field in schema]
+        has_geometry = any(col in column_names_lower for col in GEOMETRY_COLUMNS)
+
+        # FlatGeobuf requires geometry - fail early with a clear message
+        if not has_geometry and format_name == "flatgeobuf":
+            raise click.ClickException(
+                "FlatGeobuf requires geometry data but no geometry column was found. "
+                "FlatGeobuf is a geospatial format that cannot store non-spatial data. "
+                "Use 'gpio convert csv' for non-spatial data."
+            )
+
+        # Shapefile and GeoPackage can work without geometry, but warn the user
+        if not has_geometry:
+            warn(
+                f"No geometry column found. The output {config['description']} will contain "
+                f"attribute data only (no spatial features)."
+            )
+
         compatible_cols = []
         for field in schema:
             # Skip complex types that GDAL can't handle
@@ -255,6 +278,7 @@ def write_csv(
     output_path: str,
     include_wkt: bool = True,
     include_bbox: bool = True,
+    overwrite: bool = False,
     verbose: bool = False,
     profile: str | None = None,
 ) -> str:
@@ -269,6 +293,7 @@ def write_csv(
         output_path: Path to output CSV file (must be local)
         include_wkt: Include geometry as WKT column (default: True)
         include_bbox: Include bbox column if present (default: True)
+        overwrite: Overwrite existing file if True (default: False)
         verbose: Print verbose output
         profile: AWS profile for S3 input files
 
@@ -278,10 +303,17 @@ def write_csv(
     Raises:
         click.ClickException: If conversion fails
     """
+    from pathlib import Path
+
     configure_verbose(verbose)
 
     if is_remote_url(output_path):
         raise click.ClickException(ERROR_REMOTE_OUTPUT.format(format="CSV"))
+
+    # Check if output exists
+    output_file = Path(output_path)
+    if output_file.exists() and not overwrite:
+        raise click.ClickException(ERROR_FILE_EXISTS.format(format="CSV", path=output_path))
 
     validate_profile_for_urls(profile, input_path)
     setup_aws_profile_if_needed(profile, input_path)
@@ -303,19 +335,19 @@ def write_csv(
             schema = pf.schema_arrow
             columns = [field.name for field in schema]
 
-        # Find geometry column
+        # Find geometry column (optional for plain Parquet files)
         geom_col = next(
             (col for col in ["geometry", "geom", "wkb_geometry"] if col in columns),
             None,
         )
 
         if not geom_col:
-            raise click.ClickException(ERROR_NO_GEOMETRY)
+            warn("No geometry column found. Converting as plain CSV without WKT.")
 
         # Build column list
         select_cols = []
         for col in columns:
-            if col == geom_col:
+            if geom_col and col == geom_col:
                 if include_wkt:
                     select_cols.append(f'ST_AsText("{col}") as wkt')
             elif col == "bbox":
@@ -371,8 +403,10 @@ def write_geojson(
     precision: int = 7,
     write_bbox: bool = False,
     id_field: str | None = None,
+    description: str | None = None,
     pretty: bool = False,
     keep_crs: bool = False,
+    overwrite: bool = False,
     verbose: bool = False,
     profile: str | None = None,
 ) -> str:
@@ -388,8 +422,10 @@ def write_geojson(
         precision: Coordinate decimal precision (default: 7)
         write_bbox: Include bbox property for features (default: False)
         id_field: Field to use as feature 'id' member
+        description: FeatureCollection description (default: None)
         pretty: Pretty-print JSON output (default: False)
         keep_crs: Keep original CRS instead of reprojecting to WGS84 (default: False)
+        overwrite: Overwrite existing file if True (default: False)
         verbose: Print verbose output
         profile: AWS profile for S3 input files
 
@@ -399,6 +435,8 @@ def write_geojson(
     Raises:
         click.ClickException: If conversion fails
     """
+    from pathlib import Path
+
     from geoparquet_io.core.geojson_stream import convert_to_geojson
 
     configure_verbose(verbose)
@@ -408,7 +446,31 @@ def write_geojson(
             "GeoJSON output path must be local. Use upload() for cloud destinations."
         )
 
+    # Check if output exists
+    output_file = Path(output_path)
+    if output_file.exists() and not overwrite:
+        raise click.ClickException(ERROR_FILE_EXISTS.format(format="GeoJSON", path=output_path))
+
     validate_profile_for_urls(profile, input_path)
+    setup_aws_profile_if_needed(profile, input_path)
+
+    # Check if input has geometry column
+    input_url = safe_file_url(input_path, verbose)
+    import fsspec
+
+    with fsspec.open(input_url, "rb") as f:
+        pf = pq.ParquetFile(f)
+        schema = pf.schema_arrow
+    column_names_lower = [field.name.lower() for field in schema]
+    has_geometry = any(col in column_names_lower for col in GEOMETRY_COLUMNS)
+
+    if not has_geometry:
+        # Reject GeoJSON export without geometry data
+        raise click.ClickException(
+            "Cannot export to GeoJSON: no geometry column found. "
+            "GeoJSON requires geometry data. Expected column named 'geom', 'geometry', 'wkb_geometry', or 'shape'. "
+            "To export data without geometry, use CSV format instead: gpio convert input.parquet output.csv"
+        )
 
     progress(f"Converting to GeoJSON: {output_path}")
 
@@ -419,6 +481,7 @@ def write_geojson(
             precision=precision,
             write_bbox=write_bbox,
             id_field=id_field,
+            description=description,
             pretty=pretty,
             keep_crs=keep_crs,
             verbose=verbose,
@@ -490,6 +553,7 @@ def write_format(
             output_path,
             include_wkt=format_options.get("include_wkt", True),
             include_bbox=format_options.get("include_bbox", True),
+            overwrite=format_options.get("overwrite", False),
             verbose=verbose,
             profile=profile,
         )
@@ -502,6 +566,7 @@ def write_format(
             id_field=format_options.get("id_field"),
             pretty=format_options.get("pretty", False),
             keep_crs=format_options.get("keep_crs", False),
+            overwrite=format_options.get("overwrite", False),
             verbose=verbose,
             profile=profile,
         )
