@@ -298,9 +298,12 @@ class TestBigQueryConnection:
         # Should not raise — INSTALL failure is caught internally
         get_bigquery_connection()
 
-    def test_credentials_file_validation(self):
+    @patch("geoparquet_io.core.extract_bigquery._setup_bigquery_connection")
+    def test_credentials_file_validation(self, mock_setup):
         """Test that non-existent credentials file raises error."""
         from geoparquet_io.core.extract_bigquery import get_bigquery_connection
+
+        mock_setup.return_value = MagicMock()
 
         with pytest.raises(FileNotFoundError, match="Credentials file not found"):
             get_bigquery_connection(credentials_file="/nonexistent/path/credentials.json")
