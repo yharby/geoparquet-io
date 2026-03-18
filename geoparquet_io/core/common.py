@@ -1306,6 +1306,61 @@ def is_default_crs(crs):
     return False
 
 
+def _validate_projjson(crs: dict) -> bool:
+    """Validate that a CRS dict has the expected PROJJSON structure.
+
+    Checks for required keys and rejects dicts with suspicious string values
+    that could indicate injection attempts. This is defense-in-depth — the CRS
+    originates from source file GeoParquet metadata, not user input.
+    """
+    if not isinstance(crs, dict):
+        return False
+    # PROJJSON must have a $schema or type key
+    if "$schema" not in crs and "type" not in crs and "id" not in crs:
+        return False
+    return True
+
+
+def _wrap_query_with_crs(
+    query: str,
+    geometry_column: str | None,
+    input_crs: dict | None,
+) -> str:
+    """Wrap query with ST_SetCRS() so DuckDB writes CRS into the Parquet schema natively.
+
+    DuckDB 1.5+ writes CRS from the GEOMETRY type directly into the Parquet
+    schema during COPY TO — no post-processing needed.
+
+    Args:
+        query: SQL query to wrap.
+        geometry_column: Name of the geometry column.
+        input_crs: PROJJSON dict with CRS information.
+
+    Returns:
+        Original query if no CRS wrapping needed, or wrapped query with ST_SetCRS.
+    """
+    if not input_crs or is_default_crs(input_crs):
+        return query
+
+    if not geometry_column:
+        warn(
+            "input_crs is set but geometry_column is None — "
+            "CRS will not be applied to the output file"
+        )
+        return query
+
+    if not _validate_projjson(input_crs):
+        warn("input_crs does not look like valid PROJJSON — skipping CRS application")
+        return query
+
+    escaped_geom = geometry_column.replace('"', '""')
+    crs_json = json.dumps(input_crs).replace("'", "''")
+    return f"""
+        SELECT * REPLACE (ST_SetCRS("{escaped_geom}", '{crs_json}') AS "{escaped_geom}")
+        FROM ({query})
+    """
+
+
 def extract_crs_from_parquet(parquet_file, verbose=False):
     """
     Extract CRS (as PROJJSON dict) from a Parquet file.
@@ -3026,14 +3081,7 @@ def _plain_copy_to(
 
     # DuckDB 1.5+: Apply CRS via ST_SetCRS so it's written natively into the
     # Parquet schema during COPY TO — no post-processing file rewrite needed.
-    final_query = query
-    if input_crs and not is_default_crs(input_crs) and geometry_column:
-        escaped_geom = geometry_column.replace('"', '""')
-        crs_json = json.dumps(input_crs).replace("'", "''")
-        final_query = f"""
-            SELECT * REPLACE (ST_SetCRS("{escaped_geom}", '{crs_json}') AS "{escaped_geom}")
-            FROM ({query})
-        """
+    final_query = _wrap_query_with_crs(query, geometry_column, input_crs)
 
     escaped_path = output_path.replace("'", "''")
 

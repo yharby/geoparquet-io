@@ -114,22 +114,12 @@ def _wrap_query_with_crs(
     geometry_column: str,
     input_crs: dict | None,
 ) -> str:
-    """Wrap query with ST_SetCRS() so DuckDB writes CRS into the Parquet schema natively.
+    """Wrap query with ST_SetCRS() — delegates to shared helper in common.py."""
+    from geoparquet_io.core.common import (
+        _wrap_query_with_crs as _common_wrap_query_with_crs,
+    )
 
-    DuckDB 1.5+ writes CRS from the GEOMETRY type directly into the Parquet
-    schema during COPY TO — no post-processing needed.
-    """
-    from geoparquet_io.core.common import is_default_crs
-
-    if not input_crs or is_default_crs(input_crs):
-        return query
-
-    escaped_geom = geometry_column.replace('"', '""')
-    crs_json = json.dumps(input_crs).replace("'", "''")
-    return f"""
-        SELECT * REPLACE (ST_SetCRS("{escaped_geom}", '{crs_json}') AS "{escaped_geom}")
-        FROM ({query})
-    """
+    return _common_wrap_query_with_crs(query, geometry_column, input_crs)
 
 
 def _detect_bbox_column_name(schema_names: list[str]) -> str | None:
