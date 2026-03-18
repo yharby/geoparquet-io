@@ -1343,11 +1343,10 @@ def _wrap_query_with_crs(
         return query
 
     if not geometry_column:
-        warn(
-            "input_crs is set but geometry_column is None — "
-            "CRS will not be applied to the output file"
+        raise ValueError(
+            "geometry_column is required when input_crs is specified — "
+            "cannot apply CRS without a geometry column"
         )
-        return query
 
     if not _validate_projjson(input_crs):
         warn("input_crs does not look like valid PROJJSON — skipping CRS application")

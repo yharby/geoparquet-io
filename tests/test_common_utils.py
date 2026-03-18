@@ -885,10 +885,10 @@ class TestWrapQueryWithCrs:
         assert '"geometry"' in result
         assert "FROM (SELECT * FROM tbl)" in result
 
-    def test_warns_when_geometry_column_is_none(self):
+    def test_raises_when_geometry_column_is_none(self):
         query = "SELECT * FROM tbl"
-        result = _wrap_query_with_crs(query, None, self.SAMPLE_CRS)
-        assert result == query  # Returns unchanged
+        with pytest.raises(ValueError, match="geometry_column is required"):
+            _wrap_query_with_crs(query, None, self.SAMPLE_CRS)
 
     def test_escapes_column_name_with_quotes(self):
         query = "SELECT * FROM tbl"
