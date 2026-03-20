@@ -39,14 +39,11 @@ gpio inspect myfile.parquet
 # Check file quality and best practices
 gpio check all myfile.parquet
 
-# Add spatial indexing columns
-gpio add bbox input.parquet output.parquet              # Bounding boxes
-gpio add h3 input.parquet output.parquet --resolution 8 # H3 hexagons
-gpio add quadkey input.parquet output.parquet           # Quadkeys
-gpio add s2 input.parquet output.parquet --level 13     # S2 cells
-gpio add kdtree input.parquet output.parquet            # KD-tree partitions
+# Add spatial indexing (bbox, h3, quadkey, s2, a5, kdtree)
+gpio add bbox input.parquet output.parquet
+gpio add h3 input.parquet output.parquet --resolution 8
 
-# Add administrative divisions via spatial join
+# Enrich with administrative boundaries
 gpio add admin-divisions input.parquet output.parquet --dataset gaul --levels continent,country
 
 # Sort using spatial curves for better compression and query performance
@@ -65,7 +62,7 @@ gpio sort hilbert https://example.com/data.parquet s3://bucket/sorted.parquet
 gpio extract --bbox "-122.5,37.5,-122.0,38.0" input.parquet | gpio add bbox - | gpio sort hilbert - output.parquet
 ```
 
-For more examples and detailed usage, see the [Quick Start Tutorial](https://geoparquet.io/getting-started/quickstart/) and [User Guide](https://geoparquet.io/guide/inspect/).
+For complete command documentation including all spatial indexing options, see the [CLI Reference](https://geoparquet.io/cli/add/) and [User Guide](https://geoparquet.io/guide/inspect/).
 
 ## Python API
 
