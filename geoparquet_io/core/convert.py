@@ -100,11 +100,22 @@ def _is_parquet_file(input_file):
     return ext == ".parquet"
 
 
+# Default max line size for CSV reading: 50MB
+# DuckDB defaults to 2MB, but geospatial CSVs often contain WKT geometries
+# with complex polygons (coastlines, admin boundaries) that exceed this.
+# 50MB should handle virtually any reasonable geospatial data.
+# See: https://github.com/geoparquet/geoparquet-io/issues/301
+CSV_MAX_LINE_SIZE = 50 * 1024 * 1024  # 50 MB
+
+
 def _build_csv_read_expr(input_file, delimiter):
-    """Build DuckDB CSV read expression."""
+    """Build DuckDB CSV read expression with geospatial-appropriate max_line_size."""
     if delimiter:
-        return f"read_csv('{input_file}', delim='{delimiter}', header=true, AUTO_DETECT=TRUE)"
-    return f"read_csv_auto('{input_file}')"
+        return (
+            f"read_csv('{input_file}', delim='{delimiter}', header=true, "
+            f"AUTO_DETECT=TRUE, max_line_size={CSV_MAX_LINE_SIZE})"
+        )
+    return f"read_csv_auto('{input_file}', max_line_size={CSV_MAX_LINE_SIZE})"
 
 
 def _get_csv_columns(con, csv_read):
