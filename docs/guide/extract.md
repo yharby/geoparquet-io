@@ -941,6 +941,28 @@ To find service URLs:
 !!! note "Layer ID Required"
     The URL must include the layer ID (e.g., `/FeatureServer/0`). Services often have multiple layers—use the REST directory to find the correct one.
 
+## Extracting from WFS Services
+
+Web Feature Service (WFS) is an OGC standard for serving vector geospatial data over HTTP. Many government agencies and organizations publish data via WFS.
+
+### Basic Usage
+
+<!-- TODO: Add CLI examples after implementation -->
+
+### Bbox Filtering
+
+<!-- TODO: Add bbox filtering examples -->
+
+### Python API
+
+<!-- TODO: Add Python API examples -->
+
+### Common Public WFS Services
+
+- USGS Protected Areas Database (PAD-US)
+- State GIS portals
+- Municipal data services
+
 ## Working with Partitioned Input Data
 
 The `extract` command can read from partitioned GeoParquet datasets, including directories containing multiple parquet files and hive-style partitions.
