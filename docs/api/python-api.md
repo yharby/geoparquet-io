@@ -176,6 +176,51 @@ gpio.extract_arcgis(
 !!! note "No automatic Hilbert sorting"
     Unlike the CLI `gpio extract arcgis` command, the Python API does NOT apply Hilbert sorting by default. Chain `.sort_hilbert()` explicitly if you want spatial ordering.
 
+### Reading from WFS Services
+
+Use `Table.from_wfs()` to read from OGC Web Feature Services. WFS is widely used by government agencies and organizations for publishing geospatial data.
+
+#### Table.from_wfs()
+
+Create a Table from a WFS layer:
+
+```python
+from geoparquet_io.api import Table
+
+table = Table.from_wfs(
+    'https://geo.example.com/wfs',
+    'cities',
+    version='1.1.0',      # WFS version (1.0.0 or 1.1.0)
+    bbox=(-122.5, 37.5, -122.0, 38.0),  # Optional filter
+    limit=1000,           # Max features
+    max_workers=2,        # Parallel requests
+)
+```
+
+#### ops.from_wfs()
+
+Functional API returning PyArrow Table:
+
+```python
+from geoparquet_io.api import ops
+
+table = ops.from_wfs('https://geo.example.com/wfs', 'cities', limit=100)
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `url` | str | WFS service URL |
+| `layer` | str | Layer name to extract |
+| `version` | str | WFS version: `1.0.0` or `1.1.0` (default) |
+| `bbox` | tuple | Bounding box filter (xmin, ymin, xmax, ymax) |
+| `limit` | int | Maximum number of features |
+| `max_workers` | int | Number of parallel fetch workers (default: 1) |
+
+!!! note "No automatic Hilbert sorting"
+    Like other Python API extraction methods, `from_wfs()` does NOT apply Hilbert sorting by default. Chain `.sort_hilbert()` explicitly if needed.
+
 ## Table Class
 
 The `Table` class wraps a PyArrow Table and provides chainable transformation methods.

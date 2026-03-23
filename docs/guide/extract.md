@@ -947,21 +947,62 @@ Web Feature Service (WFS) is an OGC standard for serving vector geospatial data 
 
 ### Basic Usage
 
-<!-- TODO: Add CLI examples after implementation -->
+=== "CLI"
+    ```bash
+    # List available layers
+    gpio extract wfs https://geo.example.com/wfs
+
+    # Extract a layer to GeoParquet
+    gpio extract wfs https://geo.example.com/wfs cities output.parquet
+
+    # Extract with limit
+    gpio extract wfs https://geo.example.com/wfs cities output.parquet --limit 1000
+    ```
+
+=== "Python"
+    ```python
+    from geoparquet_io.api import Table
+
+    # Extract and chain operations
+    Table.from_wfs('https://geo.example.com/wfs', 'cities', limit=1000) \
+        .add_bbox() \
+        .sort_hilbert() \
+        .write('cities.parquet')
+    ```
 
 ### Bbox Filtering
 
-<!-- TODO: Add bbox filtering examples -->
+=== "CLI"
+    ```bash
+    # Server-side bbox filter (recommended for large datasets)
+    gpio extract wfs https://geo.example.com/wfs cities output.parquet \
+        --bbox -122.5,37.5,-122.0,38.0 --bbox-mode server
+    ```
 
-### Python API
+=== "Python"
+    ```python
+    from geoparquet_io.api import Table
 
-<!-- TODO: Add Python API examples -->
+    table = Table.from_wfs(
+        'https://geo.example.com/wfs',
+        'cities',
+        bbox=(-122.5, 37.5, -122.0, 38.0)
+    )
+    ```
+
+### Parallel Fetching
+
+For faster extraction from large datasets:
+
+```bash
+gpio extract wfs https://geo.example.com/wfs cities output.parquet --max-workers 3
+```
 
 ### Common Public WFS Services
 
-- USGS Protected Areas Database (PAD-US)
-- State GIS portals
-- Municipal data services
+- **USGS Protected Areas Database (PAD-US)**: `https://gis1.usgs.gov/arcgis/services/padus3_0/MapServer/WFSServer`
+- State GIS portals (varies by state)
+- Municipal open data portals
 
 ## Working with Partitioned Input Data
 
