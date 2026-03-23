@@ -431,10 +431,22 @@ def get_layer_info(service_url: str, typename: str, version: str = "1.1.0") -> W
 
     # Get available output formats
     available_formats = []
-    if hasattr(wfs, "getfeature_output_formats"):
+
+    # Method 1: WFS 1.1.0+ - Check operations metadata parameters
+    if hasattr(wfs, "operations"):
+        for op in wfs.operations:
+            if op.name == "GetFeature" and hasattr(op, "parameters"):
+                params = op.parameters
+                if "outputFormat" in params and "values" in params["outputFormat"]:
+                    available_formats = list(params["outputFormat"]["values"])
+                    break
+
+    # Method 2: Legacy attribute (some OWSLib versions)
+    if not available_formats and hasattr(wfs, "getfeature_output_formats"):
         available_formats = list(wfs.getfeature_output_formats)
-    elif hasattr(wfs, "capabilities") and wfs.capabilities:
-        # Try to extract from capabilities XML
+
+    # Method 3: Fall back to capabilities XML parsing (WFS 1.0.0 style)
+    if not available_formats and hasattr(wfs, "capabilities") and wfs.capabilities:
         try:
             from owslib.util import nspath_eval
 
@@ -985,6 +997,32 @@ def _is_geojson_response(content: bytes) -> bool:
         return False
 
 
+def _check_wfs_exception(content: bytes) -> str | None:
+    """
+    Check if response is a WFS exception report.
+
+    Returns:
+        Exception message if found, None otherwise
+    """
+    try:
+        # Quick check for XML exception markers
+        if b"ExceptionReport" in content or b"ExceptionText" in content:
+            # Parse the exception text
+            import re as regex
+
+            match = regex.search(rb"<ows:ExceptionText>([^<]+)</ows:ExceptionText>", content)
+            if match:
+                return match.group(1).decode("utf-8", errors="replace")
+            # Try ServiceException (WFS 1.0.0 style)
+            match = regex.search(rb"<ServiceException[^>]*>([^<]+)</ServiceException>", content)
+            if match:
+                return match.group(1).decode("utf-8", errors="replace")
+            return "Unknown WFS exception"
+    except Exception:
+        pass
+    return None
+
+
 def _response_has_features(content: bytes) -> bool:
     """
     Check if a WFS response contains actual features.
@@ -1151,11 +1189,22 @@ def _geojson_to_arrow_table(features: list[dict]) -> pa.Table | None:
         with open(temp_file, "w") as f:
             f.write(geojson_collection)
 
+        # Get columns to build dynamic EXCLUDE clause
+        # (OGC_FID only present in some formats like GML, not GeoJSON)
+        cols_result = con.execute(f"SELECT * FROM ST_Read('{temp_file}') LIMIT 0")
+        columns = [col[0] for col in cols_result.description]
+
+        # Build exclude list - always exclude geom, conditionally exclude OGC_FID
+        exclude_cols = ["geom"]
+        if "OGC_FID" in columns:
+            exclude_cols.append("OGC_FID")
+        exclude_clause = ", ".join(exclude_cols)
+
         # Read GeoJSON and convert geometry to WKB
         query = f"""
             SELECT
                 ST_AsWKB(geom) as geometry,
-                * EXCLUDE (geom, OGC_FID)
+                * EXCLUDE ({exclude_clause})
             FROM ST_Read('{temp_file}')
         """
 
@@ -1270,7 +1319,15 @@ def _parse_response_to_table(
 
     Returns:
         PyArrow Table or None if empty
+
+    Raises:
+        WFSError: If response is a WFS exception report
     """
+    # Check for WFS exception response first
+    exception_msg = _check_wfs_exception(content)
+    if exception_msg:
+        raise WFSError(f"WFS server error: {exception_msg}")
+
     if _is_geojson_response(content):
         features = _parse_geojson_features(content)
         return _geojson_to_arrow_table(features)

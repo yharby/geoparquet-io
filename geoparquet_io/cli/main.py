@@ -2767,7 +2767,6 @@ def extract_wfs_cmd(
     compression_level,
     row_group_size,
     row_group_size_mb,
-    write_memory,
     geoparquet_version,
     overwrite,
     verbose,
