@@ -979,24 +979,25 @@ class TestNamespaceResolution:
 class TestWFSIntegration:
     """Integration tests against real WFS services."""
 
-    # USGS Protected Areas Database WFS
-    USGS_WFS_URL = "https://gis1.usgs.gov/arcgis/services/padus3_0/MapServer/WFSServer"
-    USGS_TYPENAME = "padus3_0:PADUS3_0Combined_Proclamation_Marine"
+    # Transport for Cairo GeoServer (known to support GeoJSON)
+    WFS_URL = "https://data.transportforcairo.com/geoserver/geonode/ows"
+    TYPENAME = "geonode:cairo_od_stats"
 
     def test_list_available_layers(self):
         """Test listing layers from real WFS."""
 
         # Should not raise - just verify it runs
-        list_available_layers(self.USGS_WFS_URL)
+        layers = list_available_layers(self.WFS_URL)
+        assert len(layers) > 0
 
     def test_extract_with_limit(self, tmp_path):
         """Test extracting features with limit."""
         from geoparquet_io.core.wfs import convert_wfs_to_geoparquet
 
-        output = tmp_path / "usgs_test.parquet"
+        output = tmp_path / "cairo_test.parquet"
         convert_wfs_to_geoparquet(
-            self.USGS_WFS_URL,
-            self.USGS_TYPENAME,
+            self.WFS_URL,
+            self.TYPENAME,
             str(output),
             limit=10,
             skip_hilbert=True,
@@ -1009,15 +1010,16 @@ class TestWFSIntegration:
         assert "geometry" in table.column_names
 
     def test_extract_with_bbox(self, tmp_path):
-        """Test bbox filtering (California region)."""
+        """Test bbox filtering (Cairo region)."""
         from geoparquet_io.core.wfs import convert_wfs_to_geoparquet
 
         output = tmp_path / "bbox_test.parquet"
+        # Cairo bbox (roughly)
         convert_wfs_to_geoparquet(
-            self.USGS_WFS_URL,
-            self.USGS_TYPENAME,
+            self.WFS_URL,
+            self.TYPENAME,
             str(output),
-            bbox=(-122.5, 37.5, -122.0, 38.0),
+            bbox=(31.2, 29.9, 31.3, 30.0),
             bbox_mode="server",
             limit=5,
             skip_hilbert=True,
@@ -1033,8 +1035,8 @@ class TestWFSIntegration:
         from geoparquet_io.api import Table
 
         table = Table.from_wfs(
-            self.USGS_WFS_URL,
-            self.USGS_TYPENAME,
+            self.WFS_URL,
+            self.TYPENAME,
             limit=5,
         )
         assert table.num_rows <= 5

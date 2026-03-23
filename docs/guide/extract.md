@@ -1068,8 +1068,8 @@ gpio extract wfs https://geo.example.com/wfs cities output.parquet \
 
 ### Common Public WFS Services
 
-- **USGS Protected Areas Database (PAD-US)**: `https://gis1.usgs.gov/arcgis/services/padus3_0/MapServer/WFSServer`
 - **Transport for Cairo**: `https://data.transportforcairo.com/geoserver/geonode/ows`
+- **GeoServer Demo**: `https://demo.geoserver.org/geoserver/wfs`
 - State GIS portals (varies by state)
 - Municipal open data portals
 
