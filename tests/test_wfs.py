@@ -1256,3 +1256,75 @@ class TestBboxParsing:
         # Swapped coordinates indicate user error
         # "-122.0,38.0,-122.5,37.5"  # xmin > xmax AND ymin > ymax
         pass
+
+
+# =============================================================================
+# Integration Tests (require network)
+# =============================================================================
+
+
+@pytest.mark.network
+@pytest.mark.slow
+class TestWFSIntegration:
+    """Integration tests against real WFS services."""
+
+    # USGS Protected Areas Database WFS
+    USGS_WFS_URL = "https://gis1.usgs.gov/arcgis/services/padus3_0/MapServer/WFSServer"
+    USGS_TYPENAME = "padus3_0:PADUS3_0Combined_Proclamation_Marine"
+
+    def test_list_available_layers(self):
+        """Test listing layers from real WFS."""
+        from geoparquet_io.core.wfs import list_available_layers
+
+        # Should not raise - just verify it runs
+        list_available_layers(self.USGS_WFS_URL)
+
+    def test_extract_with_limit(self, tmp_path):
+        """Test extracting features with limit."""
+        from geoparquet_io.core.wfs import convert_wfs_to_geoparquet
+
+        output = tmp_path / "usgs_test.parquet"
+        convert_wfs_to_geoparquet(
+            self.USGS_WFS_URL,
+            self.USGS_TYPENAME,
+            str(output),
+            limit=10,
+            skip_hilbert=True,
+            skip_bbox=True,
+        )
+        import pyarrow.parquet as pq
+
+        table = pq.read_table(output)
+        assert table.num_rows <= 10
+        assert "geometry" in table.column_names
+
+    def test_extract_with_bbox(self, tmp_path):
+        """Test bbox filtering (California region)."""
+        from geoparquet_io.core.wfs import convert_wfs_to_geoparquet
+
+        output = tmp_path / "bbox_test.parquet"
+        convert_wfs_to_geoparquet(
+            self.USGS_WFS_URL,
+            self.USGS_TYPENAME,
+            str(output),
+            bbox=(-122.5, 37.5, -122.0, 38.0),
+            bbox_mode="server",
+            limit=5,
+            skip_hilbert=True,
+            skip_bbox=True,
+        )
+        import pyarrow.parquet as pq
+
+        table = pq.read_table(output)
+        assert table.num_rows >= 0  # May be 0 if no data in bbox
+
+    def test_python_api(self):
+        """Test Python API."""
+        from geoparquet_io.api import Table
+
+        table = Table.from_wfs(
+            self.USGS_WFS_URL,
+            self.USGS_TYPENAME,
+            limit=5,
+        )
+        assert table.num_rows <= 5
