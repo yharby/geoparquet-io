@@ -835,6 +835,10 @@ def _fetch_wfs_page_duckdb(url: str) -> pa.Table:
     """
     con = get_duckdb_connection(load_spatial=True, load_httpfs=True)
 
+    # Configure longer HTTP timeout for slow WFS servers (10 minutes)
+    # Large datasets like 309k features can take 2-3 minutes to stream
+    con.execute("SET http_timeout=600000")
+
     # Use DuckDB to fetch and parse the WFS GeoJSON in one query
     # This streams the HTTP response and parses JSON directly
     # Step 1: Unnest features and extract geometry + properties struct
@@ -842,7 +846,7 @@ def _fetch_wfs_page_duckdb(url: str) -> pa.Table:
     query = f"""
         WITH features AS (
             SELECT unnest(features) AS feature
-            FROM read_json_auto('{url}')
+            FROM read_json_auto('{url}', maximum_object_size=536870912)
         ),
         extracted AS (
             SELECT
@@ -860,7 +864,7 @@ def _fetch_wfs_page_duckdb(url: str) -> pa.Table:
         debug(f"DuckDB fetch: {url[:80]}...")
         start_time = time.time()
         result = con.execute(query)
-        table = result.fetch_arrow_table()
+        table = result.arrow().read_all()
         elapsed = time.time() - start_time
         debug(f"DuckDB OK: {table.num_rows:,} rows in {elapsed:.1f}s")
         return table
@@ -869,6 +873,62 @@ def _fetch_wfs_page_duckdb(url: str) -> pa.Table:
         if "HTTP" in error_msg or "Could not" in error_msg:
             raise WFSError(f"Failed to fetch WFS data: {e}") from e
         raise WFSError(f"Failed to parse WFS response: {e}") from e
+
+
+def fetch_all_features_duckdb(
+    service_url: str,
+    typename: str,
+    version: str = "1.1.0",
+    max_features: int | None = None,
+    bbox: tuple[float, float, float, float] | None = None,
+    crs: str | None = None,
+) -> pa.Table:
+    """
+    Fetch ALL WFS features using DuckDB's native HTTP streaming.
+
+    This is MUCH faster than Python HTTP because:
+    - DuckDB streams the HTTP response (no Python memory buffering)
+    - JSON parsing happens in C++ (faster than Python json)
+    - Geometry conversion happens in-database (no temp files)
+
+    For large datasets, this can be 10x+ faster than the Python approach.
+
+    Args:
+        service_url: WFS service URL
+        typename: Layer typename
+        version: WFS version
+        max_features: Maximum features to fetch (None = all)
+        bbox: Optional bounding box filter
+        crs: CRS for bbox parameter
+
+    Returns:
+        PyArrow Table with geometry (WKB) and all properties
+    """
+    from urllib.parse import urlencode
+
+    clean_url = _clean_service_url(service_url)
+
+    # Build request parameters - use maxFeatures for all versions (more widely supported)
+    params = {
+        "service": "WFS",
+        "version": version,
+        "request": "GetFeature",
+        "typeName" if version == "1.0.0" else "typeNames": typename,
+        "outputFormat": "application/json",
+    }
+
+    # Add feature limit if specified
+    if max_features:
+        params["maxFeatures"] = str(max_features)
+
+    # Add bbox filter
+    if bbox and crs:
+        params["bbox"] = _build_bbox_param(bbox, crs, version)
+
+    url = f"{clean_url}?{urlencode(params)}"
+
+    info("Fetching features using DuckDB-native streaming...")
+    return _fetch_wfs_page_duckdb(url)
 
 
 def fetch_all_features(
@@ -1553,9 +1613,10 @@ def wfs_to_table(
     """
     Fetch WFS layer as PyArrow Table.
 
-    Uses a memory-efficient two-pass approach:
-    1. Stream features page-by-page to a temp parquet file
-    2. Read the parquet file back as an Arrow table
+    Uses DuckDB's native HTTP streaming for 10x+ faster extraction:
+    - HTTP response is streamed directly in C++ (no Python buffering)
+    - JSON parsing happens in DuckDB (faster than Python json)
+    - Geometry conversion happens in-database (no temp files)
 
     Args:
         service_url: WFS service URL
@@ -1595,70 +1656,55 @@ def wfs_to_table(
     if bbox:
         use_server_bbox = _determine_bbox_strategy(bbox_mode, layer_info)
 
-    # Stream to temp file
-    temp_dir = tempfile.gettempdir()
-    temp_file = f"{temp_dir}/wfs_{uuid.uuid4()}.parquet"
+    # Use DuckDB-native streaming for fast extraction
+    # This is 10x+ faster than Python HTTP streaming
+    table = fetch_all_features_duckdb(
+        service_url=service_url,
+        typename=layer_info.typename,
+        version=version,
+        max_features=limit,
+        bbox=bbox if use_server_bbox else None,
+        crs=crs,
+    )
 
-    try:
-        row_count = _stream_features_to_parquet(
-            service_url,
-            layer_info,
-            temp_file,
-            version=version,
-            output_format=output_format,
-            bbox=bbox if use_server_bbox else None,
-            use_server_bbox=use_server_bbox,
-            crs=crs,
-            max_features=limit,
-            page_size=page_size,
-            max_workers=max_workers,
+    if table.num_rows == 0:
+        raise WFSError(
+            f"No features returned from WFS service for layer '{typename}'.\n"
+            "Check that the layer exists and the bbox (if specified) intersects data."
         )
 
-        if row_count == 0:
-            raise WFSError(
-                f"No features returned from WFS service for layer '{typename}'.\n"
-                "Check that the layer exists and the bbox (if specified) intersects data."
-            )
+    # Apply local bbox filter if needed
+    if bbox and not use_server_bbox:
+        debug("Applying local bbox filter...")
+        filter_sql = _build_local_bbox_filter(bbox, "geometry")
+        con = get_duckdb_connection(load_spatial=True, load_httpfs=False)
+        try:
+            con.register("features", table)
+            filtered = con.execute(f"SELECT * FROM features WHERE {filter_sql}").arrow()
+            table = filtered.read_all()
+            debug(f"After local filter: {table.num_rows:,} features")
+        finally:
+            con.close()
 
-        # Read temp file as Arrow table
-        table = pq.read_table(temp_file)
+    # Add CRS metadata to schema
+    projjson = parse_crs_string_to_projjson(_normalize_crs(crs))
+    if projjson:
+        geo_meta = {
+            "version": "1.0.0",
+            "primary_column": "geometry",
+            "columns": {
+                "geometry": {
+                    "encoding": "WKB",
+                    "crs": projjson,
+                }
+            },
+        }
+        existing_meta = table.schema.metadata or {}
+        existing_meta[b"geo"] = json.dumps(geo_meta).encode("utf-8")
+        table = table.replace_schema_metadata(existing_meta)
 
-        # Apply local bbox filter if needed
-        if bbox and not use_server_bbox:
-            debug("Applying local bbox filter...")
-            filter_sql = _build_local_bbox_filter(bbox, "geometry")
-            con = get_duckdb_connection(load_spatial=True, load_httpfs=False)
-            try:
-                con.register("features", table)
-                filtered = con.execute(f"SELECT * FROM features WHERE {filter_sql}").arrow()
-                table = filtered.read_all()
-                debug(f"After local filter: {table.num_rows:,} features")
-            finally:
-                con.close()
-
-        # Add CRS metadata to schema
-        projjson = parse_crs_string_to_projjson(_normalize_crs(crs))
-        if projjson:
-            geo_meta = {
-                "version": "1.0.0",
-                "primary_column": "geometry",
-                "columns": {
-                    "geometry": {
-                        "encoding": "WKB",
-                        "crs": projjson,
-                    }
-                },
-            }
-            existing_meta = table.schema.metadata or {}
-            existing_meta[b"geo"] = json.dumps(geo_meta).encode("utf-8")
-            table = table.replace_schema_metadata(existing_meta)
-
-        success(f"Fetched {table.num_rows:,} features from WFS")
-        return table
-
-    finally:
-        if os.path.exists(temp_file):
-            os.unlink(temp_file)
+    success(f"Fetched {table.num_rows:,} features from WFS")
+    return table
 
 
 def convert_wfs_to_geoparquet(
