@@ -599,7 +599,7 @@ After implementation, verify end-to-end:
 
 - **Test Coverage Target**: >80% for new code (following project standard)
 
-- **Complexity Target**: Grade A (maintained through modular design, each function <50 lines)
+- **Complexity Target**: Grade A (maintained through modular design, each function 30-40 lines max)
 
 - **Development Time**: ~15-22 hours
   - Core module: 8-10 hours

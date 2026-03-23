@@ -96,8 +96,8 @@ geoparquet_io/
 |--------|---------|-------|
 | `common.py` |  | 4036 |
 | `validate.py` | GeoParquet file validation against specification r... | 2854 |
+| `wfs.py` | WFS (Web Feature Service) to GeoParquet conversion... | 1588 |
 | `inspect_utils.py` | Utilities for inspecting GeoParquet files. | 1548 |
-| `wfs.py` | WFS (Web Feature Service) to GeoParquet conversion... | 1387 |
 | `convert.py` |  | 1300 |
 | `duckdb_metadata.py` | DuckDB-based Parquet metadata extraction. | 1277 |
 | `arcgis.py` | ArcGIS Feature Service to GeoParquet conversion. | 1226 |

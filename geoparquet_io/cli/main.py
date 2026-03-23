@@ -2828,7 +2828,7 @@ def extract_wfs_cmd(
 
         click.echo(f"Available layers in WFS service ({len(layers)} found):\n")
         for layer in layers:
-            name = layer.get("name", "unknown")
+            name = layer.get("typename", "unknown")
             title = layer.get("title", "")
             abstract = layer.get("abstract", "")
 

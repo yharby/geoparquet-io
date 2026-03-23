@@ -211,8 +211,8 @@ table = ops.from_wfs('https://geo.example.com/wfs', 'cities', limit=100)
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `url` | str | WFS service URL |
-| `layer` | str | Layer name to extract |
+| `service_url` | str | WFS service URL |
+| `typename` | str | Layer name to extract |
 | `version` | str | WFS version: `1.0.0` or `1.1.0` (default) |
 | `bbox` | tuple | Bounding box filter (xmin, ymin, xmax, ymax) |
 | `limit` | int | Maximum number of features |

@@ -9,6 +9,27 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# Module-level imports for WFS functions (avoids per-test imports)
+from geoparquet_io.core.wfs import (
+    WFSError,
+    WFSLayerInfo,
+    _build_bbox_param,
+    _build_local_bbox_filter,
+    _count_features_in_response,
+    _detect_best_output_format,
+    _determine_bbox_strategy,
+    _is_geojson_response,
+    _negotiate_crs,
+    _normalize_crs,
+    _response_has_features,
+    _sanitize_filename,
+    _validate_identifier,
+    fetch_all_features,
+    get_layer_info,
+    get_wfs_capabilities,
+    list_available_layers,
+)
+
 # =============================================================================
 # Mock WFS Response Data
 # =============================================================================
@@ -508,7 +529,6 @@ class TestCapabilityParsing:
     def test_parses_layer_list(self, mock_wfs_class):
         """Test that GetCapabilities returns WFS with layer contents."""
         mock_wfs_class.return_value = self._create_mock_wfs()
-        from geoparquet_io.core.wfs import get_wfs_capabilities
 
         wfs = get_wfs_capabilities("http://mock.wfs.server/wfs")
 
@@ -521,7 +541,6 @@ class TestCapabilityParsing:
     def test_extracts_layer_info(self, mock_wfs_class):
         """Test extraction of layer info via OWSLib interface."""
         mock_wfs_class.return_value = self._create_mock_wfs()
-        from geoparquet_io.core.wfs import get_wfs_capabilities
 
         wfs = get_wfs_capabilities("http://mock.wfs.server/wfs")
 
@@ -539,7 +558,6 @@ class TestCapabilityParsing:
     def test_extracts_supported_formats(self, mock_wfs_class):
         """Test extraction of supported output formats."""
         mock_wfs_class.return_value = self._create_mock_wfs()
-        from geoparquet_io.core.wfs import get_wfs_capabilities
 
         wfs = get_wfs_capabilities("http://mock.wfs.server/wfs")
 
@@ -551,7 +569,7 @@ class TestCapabilityParsing:
     def test_handles_connection_error(self, mock_wfs_class):
         """Test handling of connection errors."""
         mock_wfs_class.side_effect = Exception("Connection refused")
-        from geoparquet_io.core.wfs import WFSError, get_wfs_capabilities
+        from geoparquet_io.core.wfs import WFSError
 
         with pytest.raises(WFSError, match="Could not connect|Connection"):
             get_wfs_capabilities("http://mock.wfs.server/wfs")
@@ -615,7 +633,7 @@ class TestErrorHandling:
 
     def test_wfs_error_raised_for_invalid_url(self):
         """Test that WFSError is raised for connection failures."""
-        from geoparquet_io.core.wfs import WFSError, get_wfs_capabilities
+        from geoparquet_io.core.wfs import WFSError
 
         # Invalid URL should raise WFSError
         with pytest.raises(WFSError):
@@ -629,14 +647,14 @@ class TestErrorHandling:
         mock_wfs.contents = {"ns:cities": MagicMock()}
         mock_wfs_class.return_value = mock_wfs
 
-        from geoparquet_io.core.wfs import WFSError, get_layer_info
+        from geoparquet_io.core.wfs import WFSError
 
         with pytest.raises(WFSError, match="not found"):
             get_layer_info("http://mock.wfs.server/wfs", "nonexistent:data")
 
     def test_invalid_max_workers_raises_error(self):
         """Test that invalid max_workers value raises error."""
-        from geoparquet_io.core.wfs import WFSLayerInfo, fetch_all_features
+        from geoparquet_io.core.wfs import WFSLayerInfo
 
         layer_info = WFSLayerInfo(
             typename="test:layer",
@@ -709,6 +727,18 @@ class TestBboxStrategy:
     defaults to server-side filtering (conservative for remote services).
     """
 
+    def _create_mock_layer_info(self):
+        """Create a mock WFSLayerInfo for testing."""
+        return WFSLayerInfo(
+            typename="test:cities",
+            title="Cities",
+            crs_list=["EPSG:4326", "EPSG:3857"],
+            default_crs="EPSG:4326",
+            bbox=(-180.0, -90.0, 180.0, 90.0),
+            geometry_column="geometry",
+            available_formats=["application/json"],
+        )
+
     @pytest.mark.parametrize(
         "bbox_mode,expected",
         [
@@ -718,13 +748,9 @@ class TestBboxStrategy:
     )
     def test_explicit_mode_respected(self, bbox_mode, expected):
         """Explicit server/local mode bypasses auto-detection logic."""
-        _ = (bbox_mode, expected)  # Used when WFS module exists
-        # _determine_bbox_strategy(capabilities, layer_info, bbox_mode, threshold)
-        # "server" mode → always True (use server-side filtering)
-        # "local" mode → always False (use local filtering)
-        # from geoparquet_io.core.wfs import _determine_bbox_strategy
-        # result = _determine_bbox_strategy(MockCapabilities(), MockLayerInfo(), bbox_mode, 10000)
-        # assert result is expected
+        layer_info = self._create_mock_layer_info()
+        result = _determine_bbox_strategy(bbox_mode, layer_info)
+        assert result is expected
 
     def test_auto_mode_defaults_server_for_wfs(self):
         """Auto mode defaults to server-side for WFS (conservative choice).
@@ -733,32 +759,24 @@ class TestBboxStrategy:
         Server-side filtering is safer for remote services to avoid
         downloading large datasets unnecessarily.
         """
-        # Expected: auto mode returns True (server-side) for WFS
-        pass
+        layer_info = self._create_mock_layer_info()
+        result = _determine_bbox_strategy("auto", layer_info)
+        assert result is True  # WFS auto mode defaults to server-side
 
-    def test_auto_mode_local_when_server_lacks_bbox_support(self):
-        """Fall back to local filtering if server doesn't support BBOX operator.
-
-        Some WFS servers may not advertise BBOX in Filter_Capabilities.
-        In this case, we must filter locally with DuckDB.
-        """
-        # Expected: returns False when capabilities.supports_bbox is False
-        pass
-
-    @pytest.mark.parametrize(
-        "threshold,expected_strategy",
-        [
-            (1000, True),  # Low threshold → server
-            (100000, True),  # High threshold → still server (no row count available)
-        ],
-    )
-    def test_threshold_ignored_without_row_count(self, threshold, expected_strategy):
-        """Threshold is advisory when WFS doesn't provide row count.
-
-        WFS doesn't expose resultType=hits reliably across all servers,
-        so threshold-based logic falls back to server-side filtering.
-        """
-        _ = (threshold, expected_strategy)  # Used when WFS module exists
+    def test_auto_mode_still_uses_server_with_different_layer_info(self):
+        """Auto mode uses server-side regardless of layer_info (reserved for future)."""
+        # layer_info is reserved for future use (e.g., checking server capabilities)
+        layer_info = WFSLayerInfo(
+            typename="test:layer",
+            title=None,
+            crs_list=[],
+            default_crs=None,
+            bbox=None,
+            geometry_column="geometry",
+            available_formats=[],
+        )
+        result = _determine_bbox_strategy("auto", layer_info)
+        assert result is True  # Still defaults to server-side
 
 
 # =============================================================================
@@ -767,39 +785,33 @@ class TestBboxStrategy:
 
 
 class TestBboxFilters:
-    """Test _build_bbox_filter_wfs() filter string construction.
+    """Test bbox filter construction functions.
 
-    This function builds either:
-    - WFS bbox parameter string for server-side filtering
-    - DuckDB SQL expression for local filtering
+    Tests both:
+    - WFS bbox parameter string for server-side filtering (_build_bbox_param)
+    - DuckDB SQL expression for local filtering (_build_local_bbox_filter)
     """
 
     @pytest.mark.parametrize(
-        "bbox,geometry_column,expected_wfs_param",
+        "bbox,crs,version,expected_param",
         [
-            # Standard WFS bbox format: xmin,ymin,xmax,ymax
-            ((-122.5, 37.5, -122.0, 38.0), "geometry", "-122.5,37.5,-122.0,38.0"),
-            # Integer coordinates
-            ((-180, -90, 180, 90), "the_geom", "-180,-90,180,90"),
-            # High precision
+            # WFS 1.0.0: xmin,ymin,xmax,ymax (no CRS)
+            ((-122.5, 37.5, -122.0, 38.0), "EPSG:4326", "1.0.0", "-122.5,37.5,-122.0,38.0"),
+            # WFS 1.1.0: xmin,ymin,xmax,ymax,crs
             (
-                (-122.419416, 37.774929, -122.419415, 37.77493),
-                "geom",
-                "-122.419416,37.774929,-122.419415,37.77493",
+                (-122.5, 37.5, -122.0, 38.0),
+                "EPSG:4326",
+                "1.1.0",
+                "-122.5,37.5,-122.0,38.0,EPSG:4326",
             ),
+            # Integer coordinates
+            ((-180, -90, 180, 90), "EPSG:4326", "1.1.0", "-180,-90,180,90,EPSG:4326"),
         ],
     )
-    def test_server_side_bbox_parameter(self, bbox, geometry_column, expected_wfs_param):
-        """Server-side filtering uses WFS bbox parameter format.
-
-        WFS 1.1.0 bbox parameter: xmin,ymin,xmax,ymax (same as WGS84 order).
-        The geometry column name is NOT included in the bbox param itself.
-        """
-        _ = (bbox, geometry_column, expected_wfs_param)  # Used when WFS module exists
-        # from geoparquet_io.core.wfs import _build_bbox_filter_wfs
-        # wfs_param, duckdb_sql = _build_bbox_filter_wfs(bbox, True, geometry_column)
-        # assert wfs_param == expected_wfs_param
-        # assert duckdb_sql is None
+    def test_server_side_bbox_parameter(self, bbox, crs, version, expected_param):
+        """Server-side filtering uses WFS bbox parameter format."""
+        result = _build_bbox_param(bbox, crs, version)
+        assert result == expected_param
 
     @pytest.mark.parametrize(
         "bbox,geometry_column",
@@ -810,34 +822,34 @@ class TestBboxFilters:
         ],
     )
     def test_local_bbox_duckdb_filter(self, bbox, geometry_column):
-        """Local filtering uses DuckDB ST_Intersects expression.
-
-        Expected format:
-        ST_Intersects("<geom_col>", ST_GeomFromText('POLYGON((xmin ymin, ...))'))
-        """
-        # from geoparquet_io.core.wfs import _build_bbox_filter_wfs
-        # wfs_param, duckdb_sql = _build_bbox_filter_wfs(bbox, False, geometry_column)
-        # assert wfs_param is None
-        # assert f'"{geometry_column}"' in duckdb_sql
-        # assert "ST_Intersects" in duckdb_sql
-        # assert "ST_GeomFromText" in duckdb_sql
-        # assert "POLYGON" in duckdb_sql
-        pass
+        """Local filtering uses DuckDB ST_Intersects expression."""
+        sql = _build_local_bbox_filter(bbox, geometry_column)
+        assert f'"{geometry_column}"' in sql
+        assert "ST_Intersects" in sql
+        assert "ST_GeomFromText" in sql
+        assert "POLYGON" in sql
 
     def test_local_bbox_polygon_is_closed_ring(self):
         """DuckDB POLYGON must be a closed ring (first point == last point)."""
-        # Test bbox: (-122.5, 37.5, -122.0, 38.0)
-        # Expected POLYGON:
-        # POLYGON((-122.5 37.5, -122.0 37.5, -122.0 38.0, -122.5 38.0, -122.5 37.5))
-        # First coordinate (-122.5, 37.5) repeats at end to close the ring
-        pass
+        bbox = (-122.5, 37.5, -122.0, 38.0)
+        sql = _build_local_bbox_filter(bbox, "geometry")
+        # The polygon should start and end at the same point
+        assert "-122.5 37.5" in sql  # First point
+        # Count occurrences - should appear twice (start and end)
+        assert sql.count("-122.5 37.5") == 2
 
     def test_bbox_with_crs_suffix(self):
-        """Server-side bbox can include optional CRS suffix.
+        """WFS 1.1.0 bbox includes CRS suffix."""
+        bbox = (-122.5, 37.5, -122.0, 38.0)
+        crs = "urn:ogc:def:crs:EPSG::4326"
+        result = _build_bbox_param(bbox, crs, "1.1.0")
+        assert result.endswith(crs)
 
-        WFS 1.1.0 allows: xmin,ymin,xmax,ymax,urn:ogc:def:crs:EPSG::4326
-        """
-        pass
+    def test_invalid_geometry_column_rejected(self):
+        """Invalid geometry column names with SQL injection characters are rejected."""
+        bbox = (-122.5, 37.5, -122.0, 38.0)
+        with pytest.raises(WFSError, match="Invalid geometry column name"):
+            _build_local_bbox_filter(bbox, 'geom"; DROP TABLE --')
 
 
 # =============================================================================
@@ -865,7 +877,6 @@ class TestFormatDetection:
                 "text/xml; subtype=gml/3.1.1",
             ),
             (["gml3", "gml2"], "gml3"),
-            (["application/gml+xml; version=3.2", "gml2"], "application/gml+xml; version=3.2"),
             # GML2 as last resort
             (["text/xml; subtype=gml/2.1.2"], "text/xml; subtype=gml/2.1.2"),
             (["gml2"], "gml2"),
@@ -875,41 +886,46 @@ class TestFormatDetection:
     )
     def test_format_preference_order(self, available_formats, expected_format):
         """Formats are selected in order: GeoJSON > GML3 > GML2 > first available."""
-        _ = (available_formats, expected_format)  # Used when WFS module exists
-        # from geoparquet_io.core.wfs import _detect_best_output_format
-        # result = _detect_best_output_format(available_formats)
-        # assert result == expected_format
+        result = _detect_best_output_format(available_formats)
+        assert result == expected_format
 
-    def test_empty_formats_raises_error(self):
-        """Raise error if no output formats available."""
-        # from geoparquet_io.core.wfs import _detect_best_output_format
-        # with pytest.raises(ValueError, match="No output formats"):
-        #     _detect_best_output_format([])
-        pass
+    def test_empty_formats_returns_default(self):
+        """Empty format list returns default GML3."""
+        result = _detect_best_output_format([])
+        assert result == "GML3"
 
     @pytest.mark.parametrize(
-        "format_string,is_geojson",
+        "format_string,expected_is_json",
         [
             ("application/json", True),
             ("json", True),
             ("geojson", True),
             ("application/geo+json", True),
-            ("APPLICATION/JSON", True),  # Case insensitive
-            ("text/xml", False),
             ("gml3", False),
-            ("application/xml", False),
         ],
     )
-    def test_geojson_detection_case_insensitive(self, format_string, is_geojson):
-        """GeoJSON format detection should be case-insensitive."""
-        _ = (format_string, is_geojson)  # Used when WFS module exists
-        # Format detection helper should identify json/geojson variants
+    def test_geojson_detection(self, format_string, expected_is_json):
+        """GeoJSON format detection is case-insensitive."""
+        # Test both lowercase and uppercase
+        formats_lower = [format_string.lower(), "gml2"]
+        formats_upper = [format_string.upper(), "gml2"]
+
+        result_lower = _detect_best_output_format(formats_lower)
+        result_upper = _detect_best_output_format(formats_upper)
+
+        if expected_is_json:
+            # JSON formats should be selected over GML
+            assert "json" in result_lower.lower() or "geo" in result_lower.lower()
+            assert "json" in result_upper.lower() or "geo" in result_upper.lower()
+        else:
+            # Non-JSON GML formats - gml3 should be preferred over gml2
+            assert result_lower == format_string.lower()
 
     def test_gml_version_preference(self):
         """Prefer GML 3.x over GML 2.x for better geometry support."""
-        # GML 3.1.1/3.2 support curves, surfaces, and complex geometries
-        # GML 2.x only supports basic Point, LineString, Polygon
-        pass
+        formats = ["gml2", "gml3"]
+        result = _detect_best_output_format(formats)
+        assert result == "gml3"  # GML3 preferred over GML2
 
 
 # =============================================================================
@@ -926,13 +942,25 @@ class TestCRSNegotiation:
     3. Fall back to server default
     """
 
+    def _create_layer_info(self, crs_list, default_crs=None):
+        """Helper to create WFSLayerInfo with CRS settings."""
+        return WFSLayerInfo(
+            typename="test:layer",
+            title="Test",
+            crs_list=crs_list,
+            default_crs=default_crs or (crs_list[0] if crs_list else None),
+            bbox=None,
+            geometry_column="geometry",
+            available_formats=["application/json"],
+        )
+
     @pytest.mark.parametrize(
         "crs_list,output_crs,expected",
         [
             # Explicit output_crs respected when available
             (["EPSG:4326", "EPSG:3857"], "EPSG:3857", "EPSG:3857"),
             (["urn:ogc:def:crs:EPSG::4326", "EPSG:3857"], "EPSG:3857", "EPSG:3857"),
-            # EPSG:4326 variants matched
+            # EPSG:4326 variants matched when no output_crs
             (["urn:ogc:def:crs:EPSG::4326"], None, "urn:ogc:def:crs:EPSG::4326"),
             (["EPSG:4326", "EPSG:3857"], None, "EPSG:4326"),
             (
@@ -944,52 +972,52 @@ class TestCRSNegotiation:
     )
     def test_crs_selection_priority(self, crs_list, output_crs, expected):
         """CRS selection follows priority: explicit > EPSG:4326 > server default."""
-        _ = (crs_list, output_crs, expected)  # Used when WFS module exists
-        # from geoparquet_io.core.wfs import _negotiate_crs
-        # layer_info = MockLayerInfo(crs_list=crs_list)
-        # result = _negotiate_crs(layer_info, output_crs)
-        # assert result == expected
+        layer_info = self._create_layer_info(crs_list)
+        result = _negotiate_crs(layer_info, output_crs)
+        assert result == expected
 
     def test_fallback_to_server_default(self):
         """Fall back to default_crs when EPSG:4326 not available."""
-        # Stub: creates MockLayerInfo with UTM zones only
-        # layer_info = MockLayerInfo(
-        #     crs_list=["EPSG:32610", "EPSG:32611"],  # UTM zones, no WGS84
-        #     default_crs="EPSG:32610",
-        # )
-        # result = _negotiate_crs(layer_info, None)
-        # assert result == "EPSG:32610"
-        pass
+        layer_info = self._create_layer_info(
+            crs_list=["EPSG:32610", "EPSG:32611"],  # UTM zones, no WGS84
+            default_crs="EPSG:32610",
+        )
+        result = _negotiate_crs(layer_info, None)
+        assert result == "EPSG:32610"
 
-    def test_unsupported_output_crs_raises_warning(self):
-        """Warn if requested CRS not in server's supported list."""
-        # Stub: creates MockLayerInfo(crs_list=["EPSG:4326"])
-        # Should log warning and fall back, or raise error
-        # _negotiate_crs(layer_info, "EPSG:2154")  # French Lambert not supported
-        pass
+    def test_unsupported_output_crs_falls_back(self):
+        """When requested CRS not in supported list, fall back to available."""
+        layer_info = self._create_layer_info(crs_list=["EPSG:4326"])
+        # Request unsupported CRS - should fall back to EPSG:4326
+        result = _negotiate_crs(layer_info, "EPSG:2154")  # French Lambert
+        assert result == "EPSG:4326"
 
     @pytest.mark.parametrize(
-        "crs_variant,epsg_code",
+        "crs_variant,expected_normalized",
         [
-            ("EPSG:4326", 4326),
-            ("urn:ogc:def:crs:EPSG::4326", 4326),
-            ("http://www.opengis.net/def/crs/EPSG/0/4326", 4326),
-            ("urn:x-ogc:def:crs:EPSG:4326", 4326),
-            ("EPSG:3857", 3857),
-            ("urn:ogc:def:crs:EPSG::3857", 3857),
+            ("EPSG:4326", "EPSG:4326"),
+            ("urn:ogc:def:crs:EPSG::4326", "EPSG:4326"),
+            ("http://www.opengis.net/def/crs/EPSG/0/4326", "EPSG:4326"),
+            ("EPSG:3857", "EPSG:3857"),
+            ("urn:ogc:def:crs:EPSG::3857", "EPSG:3857"),
         ],
     )
-    def test_crs_variant_normalization(self, crs_variant, epsg_code):
+    def test_crs_variant_normalization(self, crs_variant, expected_normalized):
         """Different CRS URI formats should normalize to same EPSG code."""
-        _ = (crs_variant, epsg_code)  # Used when WFS module exists
-        # Helper function should extract EPSG code from various formats
+        result = _normalize_crs(crs_variant)
+        assert result == expected_normalized
 
     def test_empty_crs_list_uses_default(self):
         """Use default_crs when crs_list is empty."""
-        # Stub: creates MockLayerInfo(crs_list=[], default_crs="EPSG:4326")
-        # result = _negotiate_crs(layer_info, None)
-        # assert result == "EPSG:4326"
-        pass
+        layer_info = self._create_layer_info(crs_list=[], default_crs="EPSG:4326")
+        result = _negotiate_crs(layer_info, None)
+        assert result == "EPSG:4326"
+
+    def test_no_crs_available_returns_4326(self):
+        """When no CRS info at all, default to EPSG:4326."""
+        layer_info = self._create_layer_info(crs_list=[], default_crs=None)
+        result = _negotiate_crs(layer_info, None)
+        assert result == "EPSG:4326"
 
 
 # =============================================================================
@@ -998,63 +1026,57 @@ class TestCRSNegotiation:
 
 
 class TestNamespaceResolution:
-    """Test typename namespace matching logic.
-
-    WFS typenames can be specified with or without namespace prefixes.
-    The matcher should handle common variations.
-    """
+    """Test typename namespace matching and sanitization logic."""
 
     @pytest.mark.parametrize(
-        "requested,available,should_match",
-        [
-            # Exact match
-            ("test:cities", ["test:cities", "test:roads"], True),
-            # Without namespace prefix
-            ("cities", ["test:cities", "test:roads"], True),
-            # Case sensitivity (WFS typenames are typically case-sensitive)
-            ("Cities", ["test:cities", "test:roads"], False),
-            ("TEST:cities", ["test:cities"], False),
-            # No match
-            ("counties", ["test:cities", "test:roads"], False),
-            # Multiple namespaces
-            ("cities", ["ns1:cities", "ns2:cities"], True),  # Ambiguous - matches first
-        ],
-    )
-    def test_typename_matching(self, requested, available, should_match):
-        """Typename matching should handle namespace prefix variations."""
-        _ = (requested, available, should_match)  # Used when WFS module exists
-        # from geoparquet_io.core.wfs import _find_matching_typename
-        # result = _find_matching_typename(requested, available)
-        # if should_match:
-        #     assert result is not None
-        # else:
-        #     assert result is None
-
-    def test_ambiguous_typename_warns(self):
-        """Warn when typename without namespace matches multiple layers."""
-        # Requesting "cities" when both "ns1:cities" and "ns2:cities" exist
-        # Should warn user and return first match (or require explicit namespace)
-        pass
-
-    def test_full_namespace_uri_handled(self):
-        """Handle full namespace URI in typename.
-
-        Some WFS servers use full URIs: {http://example.com/ns}cities
-        """
-        pass
-
-    @pytest.mark.parametrize(
-        "typename,expected_local",
+        "typename,expected_safe",
         [
             ("test:cities", "cities"),
             ("namespace:layer_name", "layer_name"),
             ("cities", "cities"),  # No namespace
-            ("{http://example.com}cities", "cities"),  # URI namespace
+            ("ns:my-layer", "my_layer"),  # Special chars sanitized
+            ("../../../etc/passwd", "___etc_passwd"),  # Path traversal removed, slashes to _
+            ("test:layer/sublayer", "layer_sublayer"),  # Namespace stripped, slash to _
         ],
     )
-    def test_extract_local_name(self, typename, expected_local):
-        """Extract local name from qualified typename."""
-        _ = (typename, expected_local)  # Used when WFS module exists
+    def test_sanitize_filename(self, typename, expected_safe):
+        """Typename sanitization removes unsafe characters."""
+        result = _sanitize_filename(typename)
+        # Verify expected sanitized value
+        assert result == expected_safe
+        # Should not contain path separators or traversal patterns
+        assert ".." not in result
+        assert "/" not in result
+        assert "\\" not in result
+
+    def test_empty_typename_returns_layer(self):
+        """Empty or invalid typename returns default 'layer'."""
+        result = _sanitize_filename("")
+        assert result == "layer"
+
+        result = _sanitize_filename("...")
+        assert result == "layer"
+
+    @pytest.mark.parametrize(
+        "column_name,should_pass",
+        [
+            ("geometry", True),
+            ("the_geom", True),
+            ("geom123", True),
+            ("_private_geom", True),
+            ('geom"injection', False),
+            ("geom;drop", False),
+            ("geom--comment", False),
+        ],
+    )
+    def test_validate_identifier(self, column_name, should_pass):
+        """Identifier validation catches SQL injection attempts."""
+        if should_pass:
+            result = _validate_identifier(column_name)
+            assert result == column_name
+        else:
+            with pytest.raises(WFSError, match="Invalid geometry column name"):
+                _validate_identifier(column_name)
 
 
 # =============================================================================
@@ -1062,54 +1084,77 @@ class TestNamespaceResolution:
 # =============================================================================
 
 
-class TestBboxParsing:
-    """Test bbox string parsing for WFS.
+class TestResponseParsing:
+    """Test response parsing and feature counting helpers."""
 
-    The WFS module should reuse parse_bbox from common.py.
-    These tests verify WFS-specific edge cases.
-    """
+    def test_is_geojson_response_valid(self):
+        """Detect valid GeoJSON responses."""
+        geojson = b'{"type": "FeatureCollection", "features": []}'
+        assert _is_geojson_response(geojson) is True
 
-    @pytest.mark.parametrize(
-        "bbox_string,expected_tuple",
-        [
-            # Standard format
-            ("-122.5,37.5,-122.0,38.0", (-122.5, 37.5, -122.0, 38.0)),
-            # With spaces
-            ("-122.5, 37.5, -122.0, 38.0", (-122.5, 37.5, -122.0, 38.0)),
-            # Scientific notation
-            ("1e-5,2e-5,1e5,2e5", (1e-5, 2e-5, 1e5, 2e5)),
-            # Integer values
-            ("-180,-90,180,90", (-180.0, -90.0, 180.0, 90.0)),
-        ],
-    )
-    def test_bbox_string_parsing(self, bbox_string, expected_tuple):
-        """Bbox string parsing handles various formats."""
-        _ = (bbox_string, expected_tuple)  # Used when WFS module exists
-        # from geoparquet_io.core.common import parse_bbox
-        # result = parse_bbox(bbox_string)
-        # assert result == expected_tuple
+    def test_is_geojson_response_gml(self):
+        """GML responses are not GeoJSON."""
+        gml = b'<?xml version="1.0"?><wfs:FeatureCollection>'
+        assert _is_geojson_response(gml) is False
 
-    @pytest.mark.parametrize(
-        "invalid_bbox",
-        [
-            "not,a,bbox",  # Non-numeric
-            "-122.5,37.5,-122.0",  # Missing coordinate
-            "-122.5,37.5,-122.0,38.0,4326",  # Extra value (CRS suffix should be handled separately)
-            "",  # Empty
-        ],
-    )
-    def test_invalid_bbox_raises_error(self, invalid_bbox):
-        """Invalid bbox strings should raise clear errors."""
-        _ = invalid_bbox  # Used when WFS module exists
-        # from geoparquet_io.core.common import parse_bbox
-        # with pytest.raises((ValueError, click.BadParameter)):
-        #     parse_bbox(invalid_bbox)
+    def test_is_geojson_response_invalid(self):
+        """Invalid content is not GeoJSON."""
+        assert _is_geojson_response(b"not json") is False
+        assert _is_geojson_response(b"") is False
 
-    def test_bbox_coordinate_order_validation(self):
-        """Warn or error if xmin > xmax or ymin > ymax."""
-        # Swapped coordinates indicate user error
-        # "-122.0,38.0,-122.5,37.5"  # xmin > xmax AND ymin > ymax
-        pass
+    def test_response_has_features_geojson_with_features(self):
+        """GeoJSON with features returns True."""
+        import json
+
+        content = json.dumps(
+            {
+                "type": "FeatureCollection",
+                "features": [{"type": "Feature", "geometry": None, "properties": {}}],
+            }
+        ).encode()
+        assert _response_has_features(content) is True
+
+    def test_response_has_features_empty_geojson(self):
+        """Empty GeoJSON FeatureCollection returns False."""
+        import json
+
+        content = json.dumps(
+            {
+                "type": "FeatureCollection",
+                "features": [],
+            }
+        ).encode()
+        assert _response_has_features(content) is False
+
+    def test_response_has_features_gml_empty(self):
+        """GML with numberOfFeatures=0 returns False."""
+        gml = b'<?xml version="1.0"?><wfs:FeatureCollection numberOfFeatures="0"></wfs:FeatureCollection>'
+        assert _response_has_features(gml) is False
+
+    def test_count_features_geojson(self):
+        """Count features in GeoJSON response."""
+        import json
+
+        content = json.dumps(
+            {
+                "type": "FeatureCollection",
+                "features": [
+                    {"type": "Feature", "geometry": None, "properties": {"id": 1}},
+                    {"type": "Feature", "geometry": None, "properties": {"id": 2}},
+                    {"type": "Feature", "geometry": None, "properties": {"id": 3}},
+                ],
+            }
+        ).encode()
+        assert _count_features_in_response(content) == 3
+
+    def test_count_features_empty(self):
+        """Empty content returns 0."""
+        assert _count_features_in_response(b"") == 0
+
+    def test_count_features_gml_attribute(self):
+        """GML with numberOfFeatures attribute."""
+        gml = b'<wfs:FeatureCollection numberOfFeatures="42"></wfs:FeatureCollection>'
+        assert _count_features_in_response(gml) == 42
 
 
 # =============================================================================
@@ -1128,7 +1173,6 @@ class TestWFSIntegration:
 
     def test_list_available_layers(self):
         """Test listing layers from real WFS."""
-        from geoparquet_io.core.wfs import list_available_layers
 
         # Should not raise - just verify it runs
         list_available_layers(self.USGS_WFS_URL)

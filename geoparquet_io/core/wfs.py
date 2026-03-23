@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
+import threading
 import time
 import uuid
 from collections.abc import Generator
@@ -28,6 +30,17 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+
+# Public API
+__all__ = [
+    "WFSError",
+    "WFSLayerInfo",
+    "convert_wfs_to_geoparquet",
+    "get_layer_info",
+    "get_wfs_capabilities",
+    "list_available_layers",
+    "wfs_to_table",
+]
 
 from geoparquet_io.core.common import (
     get_duckdb_connection,
@@ -90,39 +103,50 @@ class WFSLayerInfo:
     available_formats: list[str]
 
 
-# Module-level HTTP client for connection pooling
+# Module-level HTTP client for connection pooling with thread safety
 _shared_http_client = None
+_http_client_lock = threading.Lock()
+
+# Default timeout for HTTP requests (seconds)
+DEFAULT_TIMEOUT = 60.0
 
 
-def _get_shared_http_client():
+def _get_shared_http_client(timeout: float = DEFAULT_TIMEOUT):
     """
     Get or create a shared HTTP client for connection pooling.
 
+    Thread-safe: uses a lock to prevent race conditions when
+    multiple threads try to create the client simultaneously.
+
     Reuses TCP connections across requests, saving ~100-200ms per request
     on TLS handshakes.
+
+    Args:
+        timeout: Request timeout in seconds (default: 60.0)
 
     Returns:
         httpx.Client: Shared client with connection pooling enabled
     """
     global _shared_http_client
 
-    if _shared_http_client is None:
-        try:
-            import httpx
+    with _http_client_lock:
+        if _shared_http_client is None:
+            try:
+                import httpx
 
-            _shared_http_client = httpx.Client(
-                timeout=60.0,
-                follow_redirects=True,
-                http2=False,  # Disabled for compatibility with older WFS servers
-                limits=httpx.Limits(
-                    max_connections=20,
-                    max_keepalive_connections=20,
-                ),
-            )
-        except ImportError as e:
-            raise WFSError(
-                "httpx is required for WFS extraction. Install with: pip install httpx"
-            ) from e
+                _shared_http_client = httpx.Client(
+                    timeout=timeout,
+                    follow_redirects=True,
+                    http2=False,  # Disabled for compatibility with older WFS servers
+                    limits=httpx.Limits(
+                        max_connections=20,
+                        max_keepalive_connections=20,
+                    ),
+                )
+            except ImportError as e:
+                raise WFSError(
+                    "httpx is required for WFS extraction. Install with: pip install httpx"
+                ) from e
 
     return _shared_http_client
 
@@ -131,9 +155,10 @@ def _reset_http_client():
     """Reset the shared HTTP client (for testing or cleanup)."""
     global _shared_http_client
 
-    if _shared_http_client is not None:
-        _shared_http_client.close()
-        _shared_http_client = None
+    with _http_client_lock:
+        if _shared_http_client is not None:
+            _shared_http_client.close()
+            _shared_http_client = None
 
 
 def _make_request(
@@ -142,6 +167,7 @@ def _make_request(
     max_retries: int = 3,
     retry_delay: float = 1.0,
     accept: str | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
 ) -> bytes:
     """
     Make HTTP GET request with retry logic.
@@ -154,6 +180,7 @@ def _make_request(
         max_retries: Number of retry attempts
         retry_delay: Base delay between retries (exponential backoff)
         accept: Accept header value (e.g., "application/json")
+        timeout: Request timeout in seconds
 
     Returns:
         Response content as bytes
@@ -170,7 +197,7 @@ def _make_request(
 
     for attempt in range(max_retries):
         try:
-            client = _get_shared_http_client()
+            client = _get_shared_http_client(timeout=timeout)
             response = client.get(url, params=params, headers=headers)
             response.raise_for_status()
             return bytes(response.content)
@@ -201,15 +228,11 @@ def _make_request(
                     time.sleep(delay)
                     continue
             elif status == 401:
-                raise WFSError(
-                    "Authentication required. WFS server requires credentials."
-                ) from None
+                raise WFSError("Authentication required. WFS server requires credentials.") from e
             elif status == 403:
-                raise WFSError(
-                    "Access denied. Check your permissions for this WFS service."
-                ) from None
+                raise WFSError("Access denied. Check your permissions for this WFS service.") from e
             elif status == 404:
-                raise WFSError(f"WFS service not found (404). Check the URL: {url}") from None
+                raise WFSError(f"WFS service not found (404). Check the URL: {url}") from e
             raise WFSError(f"HTTP error {status}: {e}") from e
 
     raise WFSError(f"Request failed after {max_retries} attempts: {last_exception}")
@@ -445,7 +468,7 @@ def list_available_layers(service_url: str, version: str = "1.1.0") -> list[dict
         version: WFS version
 
     Returns:
-        List of dicts with layer info (typename, title, bbox)
+        List of dicts with layer info (name, typename, title, abstract, bbox)
     """
     wfs = get_wfs_capabilities(service_url, version)
 
@@ -453,8 +476,10 @@ def list_available_layers(service_url: str, version: str = "1.1.0") -> list[dict
     for typename, layer in wfs.contents.items():
         layers.append(
             {
+                "name": typename,  # Alias for consistency with CLI
                 "typename": typename,
                 "title": getattr(layer, "title", None),
+                "abstract": getattr(layer, "abstract", None),
                 "bbox": tuple(layer.boundingBoxWGS84)
                 if hasattr(layer, "boundingBoxWGS84") and layer.boundingBoxWGS84
                 else None,
@@ -542,7 +567,6 @@ def _negotiate_crs(layer_info: WFSLayerInfo, output_crs: str | None = None) -> s
 def _determine_bbox_strategy(
     bbox_mode: str,
     layer_info: WFSLayerInfo,
-    bbox_threshold: int = 10000,
 ) -> bool:
     """
     Determine whether to use server-side bbox filtering.
@@ -552,12 +576,14 @@ def _determine_bbox_strategy(
 
     Args:
         bbox_mode: "auto", "server", or "local"
-        layer_info: Layer metadata
-        bbox_threshold: Threshold for auto mode (not used for WFS)
+        layer_info: Layer metadata (reserved for future use)
 
     Returns:
         True if server-side filtering should be used
     """
+    # layer_info reserved for future use (e.g., checking server capabilities)
+    _ = layer_info
+
     if bbox_mode == "server":
         debug("Using server-side bbox filter (forced by --bbox-mode server)")
         return True
@@ -599,6 +625,30 @@ def _build_bbox_param(
         return f"{xmin},{ymin},{xmax},{ymax},{crs}"
 
 
+def _validate_identifier(name: str) -> str:
+    """
+    Validate and sanitize a SQL identifier (column name).
+
+    Args:
+        name: Column name to validate
+
+    Returns:
+        Validated column name
+
+    Raises:
+        WFSError: If the name contains invalid characters
+    """
+    # Only allow alphanumeric, underscore, and standard identifier characters
+    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", name):
+        # Check for dangerous patterns
+        if '"' in name or "'" in name or ";" in name or "--" in name:
+            raise WFSError(f"Invalid geometry column name '{name}': contains unsafe characters")
+        # Allow dots for qualified names but escape them
+        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_\.]*$", name):
+            raise WFSError(f"Invalid geometry column name '{name}': must be a valid identifier")
+    return name
+
+
 def _build_local_bbox_filter(
     bbox: tuple[float, float, float, float],
     geometry_column: str,
@@ -612,10 +662,16 @@ def _build_local_bbox_filter(
 
     Returns:
         DuckDB ST_Intersects SQL condition
+
+    Raises:
+        WFSError: If geometry column name is invalid
     """
+    # Validate column name to prevent SQL injection
+    safe_column = _validate_identifier(geometry_column)
+
     xmin, ymin, xmax, ymax = bbox
     wkt = f"POLYGON(({xmin} {ymin}, {xmax} {ymin}, {xmax} {ymax}, {xmin} {ymax}, {xmin} {ymin}))"
-    return f"ST_Intersects(\"{geometry_column}\", ST_GeomFromText('{wkt}'))"
+    return f"ST_Intersects(\"{safe_column}\", ST_GeomFromText('{wkt}'))"
 
 
 def _get_feature_count(
@@ -812,14 +868,16 @@ def fetch_all_features(
                 crs=crs,
             )
 
-            # Check if we got any features
-            if not content or len(content) < 50:  # Empty response check
+            # Check if we got any features using reliable detection
+            if not _response_has_features(content):
                 break
 
             yield content
 
+            # Parse to count actual features for accurate tracking
+            actual_count = _count_features_in_response(content)
             page_num += 1
-            fetched += current_size
+            fetched += actual_count if actual_count > 0 else current_size
             offset += current_size
 
             # WFS 1.0.0 doesn't support pagination - single page only
@@ -888,7 +946,7 @@ def fetch_all_features(
                 for offset, future in futures:
                     try:
                         content = future.result()
-                        if content and len(content) >= 50:
+                        if _response_has_features(content):
                             results.append((offset, content))
                             has_content = True
                     except Exception as e:
@@ -899,11 +957,15 @@ def fetch_all_features(
 
                 # Sort by offset and yield in order
                 results.sort(key=lambda x: x[0])
+                batch_feature_count = 0
                 for _offset, content in results:
                     yield content
                     page_num += 1
+                    # Count actual features for accurate tracking (fallback to page_size per response)
+                    count = _count_features_in_response(content)
+                    batch_feature_count += count if count > 0 else page_size
 
-                fetched += len(results) * page_size
+                fetched += batch_feature_count
                 batch_start += max_workers * page_size
 
                 # WFS 1.0.0 doesn't support pagination
@@ -921,6 +983,114 @@ def _is_geojson_response(content: bytes) -> bool:
         return stripped.startswith(b"{") and b'"type"' in content
     except Exception:
         return False
+
+
+def _response_has_features(content: bytes) -> bool:
+    """
+    Check if a WFS response contains actual features.
+
+    This is more reliable than checking byte length, as empty
+    FeatureCollections can exceed 50 bytes.
+
+    Args:
+        content: Raw WFS response bytes
+
+    Returns:
+        True if response contains at least one feature
+    """
+    if not content:
+        return False
+
+    # Check for GeoJSON empty response
+    if _is_geojson_response(content):
+        try:
+            data = json.loads(content)
+            if isinstance(data, dict):
+                # Check for empty FeatureCollection
+                if data.get("type") == "FeatureCollection":
+                    features = data.get("features", [])
+                    return len(features) > 0
+                # Check numberReturned attribute (WFS 2.0 style)
+                if data.get("numberReturned") == 0:
+                    return False
+                # Single feature is valid
+                if data.get("type") == "Feature":
+                    return True
+            return True  # Assume has content if we can't determine
+        except json.JSONDecodeError:
+            return False
+
+    # Check for GML empty response
+    # Look for numberOfFeatures="0" or empty featureMember
+    if b'numberOfFeatures="0"' in content:
+        return False
+    if b'numberReturned="0"' in content:
+        return False
+
+    # Check if there's actual feature content (very basic heuristic)
+    # GML responses should have featureMember elements
+    if b"<gml:featureMember" in content or b"<wfs:member" in content:
+        return True
+
+    # For minimal responses, check for common empty indicators
+    if len(content) < 200:
+        # Very short response - likely empty or error
+        if b"<wfs:FeatureCollection" in content:
+            # It's a FeatureCollection but very short - probably empty
+            if b"featureMember" not in content and b"member>" not in content:
+                return False
+
+    # Default: assume it has features if we got a non-trivial response
+    return len(content) > 100
+
+
+def _count_features_in_response(content: bytes) -> int:
+    """
+    Count the number of features in a WFS response.
+
+    Used for accurate progress tracking instead of assuming page_size.
+
+    Args:
+        content: Raw WFS response bytes
+
+    Returns:
+        Number of features, or 0 if unable to determine
+    """
+    if not content:
+        return 0
+
+    # Try GeoJSON first (most accurate)
+    if _is_geojson_response(content):
+        try:
+            data = json.loads(content)
+            if isinstance(data, dict):
+                if data.get("type") == "FeatureCollection":
+                    features = data.get("features", [])
+                    return len(features)
+                # Check numberReturned (WFS 2.0 style)
+                if "numberReturned" in data:
+                    return int(data["numberReturned"])
+                if data.get("type") == "Feature":
+                    return 1
+        except (json.JSONDecodeError, ValueError):
+            pass
+        return 0
+
+    # Try to extract count from GML attributes
+    # Look for numberOfFeatures or numberReturned
+    match = re.search(rb'numberOfFeatures="(\d+)"', content)
+    if match:
+        return int(match.group(1))
+
+    match = re.search(rb'numberReturned="(\d+)"', content)
+    if match:
+        return int(match.group(1))
+
+    # Count featureMember elements as fallback
+    count = content.count(b"<gml:featureMember")
+    if count == 0:
+        count = content.count(b"<wfs:member")
+    return count
 
 
 def _parse_geojson_features(content: bytes) -> list[dict]:
@@ -974,7 +1144,8 @@ def _geojson_to_arrow_table(features: list[dict]) -> pa.Table | None:
     )
 
     con = get_duckdb_connection(load_spatial=True, load_httpfs=False)
-    temp_file = tempfile.gettempdir() + f"/wfs_page_{uuid.uuid4()}.geojson"
+    temp_dir = tempfile.gettempdir()
+    temp_file = os.path.join(temp_dir, f"wfs_page_{uuid.uuid4()}.geojson")
 
     try:
         with open(temp_file, "w") as f:
@@ -997,6 +1168,35 @@ def _geojson_to_arrow_table(features: list[dict]) -> pa.Table | None:
             os.unlink(temp_file)
 
 
+def _sanitize_filename(typename: str) -> str:
+    """
+    Sanitize a typename for use in temp filenames.
+
+    Removes path traversal patterns and unsafe characters.
+
+    Args:
+        typename: Layer typename from WFS
+
+    Returns:
+        Safe filename component
+    """
+    # Remove namespace prefix and any path-like components
+    name = typename.split(":")[-1] if ":" in typename else typename
+
+    # Remove path traversal patterns
+    name = name.replace("..", "")
+    name = name.replace("/", "_")
+    name = name.replace("\\", "_")
+
+    # Only keep alphanumeric and underscore
+    safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+
+    # Ensure it has meaningful content (not just underscores)
+    # Strip underscores to check if any alphanumeric content remains
+    has_content = safe_name.strip("_")
+    return safe_name if has_content else "layer"
+
+
 def _gml_to_arrow_table(content: bytes, typename: str) -> pa.Table | None:
     """
     Convert GML response to PyArrow Table with WKB geometry.
@@ -1015,8 +1215,9 @@ def _gml_to_arrow_table(content: bytes, typename: str) -> pa.Table | None:
 
     con = get_duckdb_connection(load_spatial=True, load_httpfs=False)
     # Use .xml extension - DuckDB/GDAL can auto-detect GML
-    safe_name = typename.replace(":", "_").replace("/", "_")
-    temp_file = tempfile.gettempdir() + f"/wfs_gml_{safe_name}_{uuid.uuid4()}.xml"
+    safe_name = _sanitize_filename(typename)
+    temp_dir = tempfile.gettempdir()
+    temp_file = os.path.join(temp_dir, f"wfs_gml_{safe_name}_{uuid.uuid4()}.xml")
 
     try:
         with open(temp_file, "wb") as f:
