@@ -5,40 +5,29 @@ This module provides functionality to download features from OGC WFS services
 and convert them to GeoParquet format. Supports WFS 1.0.0 and 1.1.0.
 
 Key features:
-- Automatic pagination with progress tracking
-- Parallel fetching for improved performance
-- Server-side and local bbox filtering
-- Format auto-detection (GeoJSON preferred, GML fallback)
+- DuckDB-native HTTP streaming for fast extraction (10x+ faster than Python HTTP)
+- Server-side bbox filtering
 - CRS negotiation with EPSG variant handling
-- Memory-efficient streaming to Parquet
+- Hilbert curve sorting and bbox column generation
 """
 
 from __future__ import annotations
 
+import atexit
 import json
-import os
 import re
-import tempfile
 import threading
 import time
-import uuid
-from collections.abc import Generator
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 # Public API
 __all__ = [
-    "MAX_RECOMMENDED_WORKERS",
     "WFSError",
     "WFSLayerInfo",
-    "_fetch_wfs_page_duckdb",
-    "_sanitize_properties",
     "convert_wfs_to_geoparquet",
     "get_layer_info",
     "get_wfs_capabilities",
@@ -67,12 +56,6 @@ class WFSError(Exception):
     pass
 
 
-# Default page size for WFS requests (most servers support 1000-2000)
-DEFAULT_PAGE_SIZE = 1000
-
-# Maximum recommended workers for parallel fetching
-MAX_RECOMMENDED_WORKERS = 10
-
 # GeoJSON output format identifiers (in preference order)
 GEOJSON_FORMATS = [
     "application/json",
@@ -82,7 +65,7 @@ GEOJSON_FORMATS = [
     "application/vnd.geo+json",
 ]
 
-# GML output format identifiers (in preference order)
+# GML output format identifiers (fallback, in preference order)
 GML_FORMATS = [
     "gml3",
     "text/xml; subtype=gml/3.1.1",
@@ -163,6 +146,10 @@ def _reset_http_client():
         if _shared_http_client is not None:
             _shared_http_client.close()
             _shared_http_client = None
+
+
+# Register cleanup on interpreter exit to prevent resource leak
+atexit.register(_reset_http_client)
 
 
 def _make_request(
@@ -758,66 +745,6 @@ def _get_feature_count(
     return None
 
 
-def fetch_features_page(
-    service_url: str,
-    typename: str,
-    version: str = "1.1.0",
-    offset: int = 0,
-    page_size: int = DEFAULT_PAGE_SIZE,
-    output_format: str | None = None,
-    bbox: tuple[float, float, float, float] | None = None,
-    crs: str | None = None,
-) -> bytes:
-    """
-    Fetch a single page of features from WFS.
-
-    Args:
-        service_url: WFS service URL
-        typename: Layer typename
-        version: WFS version
-        offset: Starting feature index
-        page_size: Number of features to fetch
-        output_format: Requested output format
-        bbox: Optional bounding box filter
-        crs: CRS for bbox parameter
-
-    Returns:
-        Raw response content (JSON or GML bytes)
-    """
-    clean_url = _clean_service_url(service_url)
-
-    # Build request parameters
-    params = {
-        "service": "WFS",
-        "version": version,
-        "request": "GetFeature",
-        "typeName" if version == "1.0.0" else "typeNames": typename,
-        "maxFeatures" if version == "1.0.0" else "count": str(page_size),
-    }
-
-    # Add pagination (WFS 1.1.0+)
-    if version != "1.0.0" and offset > 0:
-        params["startIndex"] = str(offset)
-
-    # Add output format
-    if output_format:
-        params["outputFormat"] = output_format
-
-    # Add bbox filter
-    if bbox and crs:
-        params["bbox"] = _build_bbox_param(bbox, crs, version)
-
-    # Determine Accept header based on format
-    accept = None
-    if output_format:
-        if any(fmt in output_format.lower() for fmt in ["json", "geo"]):
-            accept = "application/json"
-        else:
-            accept = "text/xml"
-
-    return _make_request(clean_url, params=params, accept=accept)
-
-
 def _fetch_wfs_page_duckdb(url: str) -> pa.Table:
     """
     Fetch a WFS GeoJSON page directly using DuckDB's httpfs.
@@ -839,6 +766,10 @@ def _fetch_wfs_page_duckdb(url: str) -> pa.Table:
     # Large datasets like 309k features can take 2-3 minutes to stream
     con.execute("SET http_timeout=600000")
 
+    # Escape single quotes in URL to prevent SQL injection
+    # DuckDB uses standard SQL escaping (double single quotes)
+    safe_url = url.replace("'", "''")
+
     # Use DuckDB to fetch and parse the WFS GeoJSON in one query
     # This streams the HTTP response and parses JSON directly
     # Step 1: Unnest features and extract geometry + properties struct
@@ -846,7 +777,7 @@ def _fetch_wfs_page_duckdb(url: str) -> pa.Table:
     query = f"""
         WITH features AS (
             SELECT unnest(features) AS feature
-            FROM read_json_auto('{url}', maximum_object_size=536870912)
+            FROM read_json_auto('{safe_url}', maximum_object_size=536870912)
         ),
         extracted AS (
             SELECT
@@ -875,40 +806,20 @@ def _fetch_wfs_page_duckdb(url: str) -> pa.Table:
         raise WFSError(f"Failed to parse WFS response: {e}") from e
 
 
-def fetch_all_features_duckdb(
+def _build_wfs_url(
     service_url: str,
     typename: str,
     version: str = "1.1.0",
     max_features: int | None = None,
+    start_index: int | None = None,
     bbox: tuple[float, float, float, float] | None = None,
     crs: str | None = None,
-) -> pa.Table:
-    """
-    Fetch ALL WFS features using DuckDB's native HTTP streaming.
-
-    This is MUCH faster than Python HTTP because:
-    - DuckDB streams the HTTP response (no Python memory buffering)
-    - JSON parsing happens in C++ (faster than Python json)
-    - Geometry conversion happens in-database (no temp files)
-
-    For large datasets, this can be 10x+ faster than the Python approach.
-
-    Args:
-        service_url: WFS service URL
-        typename: Layer typename
-        version: WFS version
-        max_features: Maximum features to fetch (None = all)
-        bbox: Optional bounding box filter
-        crs: CRS for bbox parameter
-
-    Returns:
-        PyArrow Table with geometry (WKB) and all properties
-    """
+) -> str:
+    """Build a WFS GetFeature URL with pagination support."""
     from urllib.parse import urlencode
 
     clean_url = _clean_service_url(service_url)
 
-    # Build request parameters - use maxFeatures for all versions (more widely supported)
     params = {
         "service": "WFS",
         "version": version,
@@ -917,694 +828,131 @@ def fetch_all_features_duckdb(
         "outputFormat": "application/json",
     }
 
-    # Add feature limit if specified
     if max_features:
+        # WFS 1.0.0 uses maxFeatures, WFS 1.1.0+ uses count (but maxFeatures often works)
         params["maxFeatures"] = str(max_features)
 
-    # Add bbox filter
+    if start_index is not None and start_index > 0 and version != "1.0.0":
+        params["startIndex"] = str(start_index)
+
     if bbox and crs:
         params["bbox"] = _build_bbox_param(bbox, crs, version)
 
-    url = f"{clean_url}?{urlencode(params)}"
+    return f"{clean_url}?{urlencode(params)}"
 
-    # Get expected count for progress reporting
+
+def fetch_all_features_duckdb(
+    service_url: str,
+    typename: str,
+    version: str = "1.1.0",
+    max_features: int | None = None,
+    bbox: tuple[float, float, float, float] | None = None,
+    crs: str | None = None,
+    max_workers: int = 1,
+    page_size: int = 10000,
+) -> pa.Table:
+    """
+    Fetch WFS features using DuckDB's native HTTP streaming.
+
+    Supports two modes:
+    - Single request (max_workers=1): Streams all features in one request. Fast for most cases.
+    - Parallel pagination (max_workers>1): Splits into paginated requests for very large
+      datasets (1M+ features) where a single request might timeout.
+
+    Args:
+        service_url: WFS service URL
+        typename: Layer typename
+        version: WFS version
+        max_features: Maximum features to fetch (None = all)
+        bbox: Optional bounding box filter
+        crs: CRS for bbox parameter
+        max_workers: Number of parallel requests (1 = single streaming request)
+        page_size: Features per page when using parallel mode (default: 10000)
+
+    Returns:
+        PyArrow Table with geometry (WKB) and all properties
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # Get expected count for progress and pagination
     total_count = _get_feature_count(service_url, typename, version)
     if max_features and total_count:
         total_count = min(total_count, max_features)
 
-    if total_count:
-        progress(f"Streaming {total_count:,} features via DuckDB...")
-    else:
-        progress("Streaming features via DuckDB...")
+    # Single request mode (default) - fastest for most cases
+    if max_workers == 1 or version == "1.0.0":
+        if total_count:
+            progress(f"Streaming {total_count:,} features via DuckDB...")
+        else:
+            progress("Streaming features via DuckDB...")
 
-    return _fetch_wfs_page_duckdb(url)
-
-
-def fetch_all_features(
-    service_url: str,
-    layer_info: WFSLayerInfo,
-    version: str = "1.1.0",
-    output_format: str | None = None,
-    bbox: tuple[float, float, float, float] | None = None,
-    use_server_bbox: bool = True,
-    crs: str | None = None,
-    max_features: int | None = None,
-    page_size: int = DEFAULT_PAGE_SIZE,
-    max_workers: int = 1,
-) -> Generator[bytes, None, None]:
-    """
-    Generator that yields pages of WFS features.
-
-    Handles pagination using startIndex/count parameters.
-
-    Args:
-        service_url: WFS service URL
-        layer_info: Layer metadata
-        version: WFS version
-        output_format: Requested output format
-        bbox: Bounding box filter
-        use_server_bbox: Whether to apply bbox server-side
-        crs: CRS for requests
-        max_features: Maximum total features to return
-        page_size: Features per page
-        max_workers: Concurrent request workers (1 = sequential)
-
-    Yields:
-        Raw response bytes for each page
-    """
-    # Validate max_workers
-    if max_workers < 1:
-        raise ValueError("max_workers must be at least 1")
-    if max_workers > MAX_RECOMMENDED_WORKERS:
-        warn(
-            f"max_workers={max_workers} may trigger rate limits. "
-            f"Recommended range: 1-{MAX_RECOMMENDED_WORKERS}"
+        url = _build_wfs_url(
+            service_url, typename, version, max_features=max_features, bbox=bbox, crs=crs
         )
-
-    # Try to get total count for progress reporting
-    total_count = _get_feature_count(service_url, layer_info.typename, version)
-    if total_count is not None:
-        debug(f"Server reports {total_count:,} features")
-    if max_features is not None and total_count is not None:
-        total_count = min(total_count, max_features)
-
-    # Determine bbox to use in requests
-    request_bbox = bbox if (bbox and use_server_bbox) else None
-
-    if max_workers == 1:
-        # Sequential fetching
-        offset = 0
-        fetched = 0
-        page_num = 0
-
-        while True:
-            # Calculate remaining if we have a limit
-            remaining = max_features - fetched if max_features else page_size
-            current_size = min(page_size, remaining)
-
-            if current_size <= 0:
-                break
-
-            # Progress message
-            end = offset + current_size
-            if total_count:
-                progress(f"Fetching features {offset + 1}-{end} of {total_count:,}...")
-            else:
-                progress(f"Fetching features {offset + 1}-{end}...")
-
-            content = fetch_features_page(
-                service_url,
-                layer_info.typename,
-                version=version,
-                offset=offset,
-                page_size=current_size,
-                output_format=output_format,
-                bbox=request_bbox,
-                crs=crs,
-            )
-
-            # Check if we got any features using reliable detection
-            if not _response_has_features(content):
-                break
-
-            yield content
-
-            # Parse to count actual features for accurate tracking
-            actual_count = _count_features_in_response(content)
-            page_num += 1
-            fetched += actual_count if actual_count > 0 else current_size
-            offset += current_size
-
-            # WFS 1.0.0 doesn't support pagination - single page only
-            if version == "1.0.0":
-                break
-
-            # Check if we've hit the limit
-            if max_features and fetched >= max_features:
-                break
-
-        debug(f"Fetched {fetched:,} features in {page_num} pages")
-
-    else:
-        # Parallel fetching with ThreadPoolExecutor
-        fetched = 0
-        batch_start = 0
-        page_num = 0
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            while True:
-                # Check if we've hit limit
-                if max_features and fetched >= max_features:
-                    break
-
-                # Submit parallel requests
-                futures = []
-
-                for i in range(max_workers):
-                    offset = batch_start + (i * page_size)
-
-                    # Respect limit
-                    if max_features:
-                        remaining = max_features - (fetched + i * page_size)
-                        if remaining <= 0:
-                            break
-                        current_size = min(page_size, remaining)
-                    else:
-                        current_size = page_size
-
-                    end = offset + current_size
-                    if total_count:
-                        progress(f"Fetching features {offset + 1}-{end} of {total_count:,}...")
-                    else:
-                        progress(f"Fetching features {offset + 1}-{end}...")
-
-                    future = executor.submit(
-                        fetch_features_page,
-                        service_url,
-                        layer_info.typename,
-                        version=version,
-                        offset=offset,
-                        page_size=current_size,
-                        output_format=output_format,
-                        bbox=request_bbox,
-                        crs=crs,
-                    )
-                    futures.append((offset, future))
-
-                if not futures:
-                    break
-
-                # Collect results in order with timeout (1.5x HTTP timeout for buffer)
-                results = []
-                has_content = False
-                future_timeout = DEFAULT_TIMEOUT * 1.5
-
-                for offset, future in futures:
-                    try:
-                        content = future.result(timeout=future_timeout)
-                        if _response_has_features(content):
-                            results.append((offset, content))
-                            has_content = True
-                    except FuturesTimeoutError as e:
-                        raise WFSError(
-                            f"Request timed out after {future_timeout}s fetching features at offset {offset}. "
-                            "The WFS server may be overloaded or rate-limiting requests."
-                        ) from e
-                    except Exception as e:
-                        raise WFSError(f"Failed to fetch features at offset {offset}: {e}") from e
-
-                if not has_content:
-                    break
-
-                # Sort by offset and yield in order
-                results.sort(key=lambda x: x[0])
-                batch_feature_count = 0
-                for _offset, content in results:
-                    yield content
-                    page_num += 1
-                    # Count actual features for accurate tracking (fallback to page_size per response)
-                    count = _count_features_in_response(content)
-                    batch_feature_count += count if count > 0 else page_size
-
-                fetched += batch_feature_count
-                batch_start += max_workers * page_size
-
-                # WFS 1.0.0 doesn't support pagination
-                if version == "1.0.0":
-                    break
-
-        debug(f"Fetched features in {page_num} pages using {max_workers} workers")
-
-
-def _is_geojson_response(content: bytes) -> bool:
-    """Check if response content appears to be GeoJSON."""
-    try:
-        # Quick check for JSON structure
-        stripped = content.strip()
-        return stripped.startswith(b"{") and b'"type"' in content
-    except Exception:
-        return False
-
-
-def _check_wfs_exception(content: bytes) -> str | None:
-    """
-    Check if response is a WFS exception report.
-
-    Returns:
-        Exception message if found, None otherwise
-    """
-    try:
-        # Quick check for XML exception markers
-        if b"ExceptionReport" in content or b"ExceptionText" in content:
-            # Parse the exception text
-            import re as regex
-
-            match = regex.search(rb"<ows:ExceptionText>([^<]+)</ows:ExceptionText>", content)
-            if match:
-                return match.group(1).decode("utf-8", errors="replace")
-            # Try ServiceException (WFS 1.0.0 style)
-            match = regex.search(rb"<ServiceException[^>]*>([^<]+)</ServiceException>", content)
-            if match:
-                return match.group(1).decode("utf-8", errors="replace")
-            return "Unknown WFS exception"
-    except Exception:
-        pass
-    return None
-
-
-def _response_has_features(content: bytes) -> bool:
-    """
-    Check if a WFS response contains actual features.
-
-    This is more reliable than checking byte length, as empty
-    FeatureCollections can exceed 50 bytes.
-
-    Args:
-        content: Raw WFS response bytes
-
-    Returns:
-        True if response contains at least one feature
-    """
-    if not content:
-        return False
-
-    # Check for GeoJSON empty response
-    if _is_geojson_response(content):
-        try:
-            data = json.loads(content)
-            if isinstance(data, dict):
-                # Check for empty FeatureCollection
-                if data.get("type") == "FeatureCollection":
-                    features = data.get("features", [])
-                    return len(features) > 0
-                # Check numberReturned attribute (WFS 2.0 style)
-                if data.get("numberReturned") == 0:
-                    return False
-                # Single feature is valid
-                if data.get("type") == "Feature":
-                    return True
-            return True  # Assume has content if we can't determine
-        except json.JSONDecodeError:
-            return False
-
-    # Check for GML empty response
-    # Look for numberOfFeatures="0" or empty featureMember
-    if b'numberOfFeatures="0"' in content:
-        return False
-    if b'numberReturned="0"' in content:
-        return False
-
-    # Check if there's actual feature content (very basic heuristic)
-    # GML responses should have featureMember elements
-    if b"<gml:featureMember" in content or b"<wfs:member" in content:
-        return True
-
-    # For minimal responses, check for common empty indicators
-    if len(content) < 200:
-        # Very short response - likely empty or error
-        if b"<wfs:FeatureCollection" in content:
-            # It's a FeatureCollection but very short - probably empty
-            if b"featureMember" not in content and b"member>" not in content:
-                return False
-
-    # Default: assume it has features if we got a non-trivial response
-    return len(content) > 100
-
-
-def _count_features_in_response(content: bytes) -> int:
-    """
-    Count the number of features in a WFS response.
-
-    Used for accurate progress tracking instead of assuming page_size.
-
-    Args:
-        content: Raw WFS response bytes
-
-    Returns:
-        Number of features, or 0 if unable to determine
-    """
-    if not content:
-        return 0
-
-    # Try GeoJSON first (most accurate)
-    if _is_geojson_response(content):
-        try:
-            data = json.loads(content)
-            if isinstance(data, dict):
-                if data.get("type") == "FeatureCollection":
-                    features = data.get("features", [])
-                    return len(features)
-                # Check numberReturned (WFS 2.0 style)
-                if "numberReturned" in data:
-                    return int(data["numberReturned"])
-                if data.get("type") == "Feature":
-                    return 1
-        except (json.JSONDecodeError, ValueError):
-            pass
-        return 0
-
-    # Try to extract count from GML attributes
-    # Look for numberOfFeatures or numberReturned
-    match = re.search(rb'numberOfFeatures="(\d+)"', content)
-    if match:
-        return int(match.group(1))
-
-    match = re.search(rb'numberReturned="(\d+)"', content)
-    if match:
-        return int(match.group(1))
-
-    # Count featureMember elements as fallback
-    count = content.count(b"<gml:featureMember")
-    if count == 0:
-        count = content.count(b"<wfs:member")
-    return count
-
-
-def _parse_geojson_features(content: bytes) -> list[dict]:
-    """
-    Parse GeoJSON response and extract features.
-
-    Args:
-        content: Raw GeoJSON bytes
-
-    Returns:
-        List of feature dicts
-    """
-    try:
-        data = json.loads(content)
-    except json.JSONDecodeError as e:
-        raise WFSError(f"Failed to parse GeoJSON response: {e}") from e
-
-    if isinstance(data, dict):
-        if data.get("type") == "FeatureCollection":
-            features = data.get("features", [])
-            return list(features) if features else []
-        elif data.get("type") == "Feature":
-            return [dict(data)]
-        elif "features" in data:
-            return list(data["features"])
-
-    return []
-
-
-def _sanitize_properties(features: list[dict]) -> list[dict]:
-    """
-    Sanitize property keys in GeoJSON features for DuckDB ST_Read compatibility.
-
-    DuckDB's ST_Read adds its own 'ogc_fid' column, so if the data already has
-    an 'ogc_fid' property (any case variation), it causes a duplicate column
-    error. This renames such conflicting properties (e.g., ogc_fid -> ogc_fid_orig).
-
-    Args:
-        features: List of GeoJSON feature dicts
-
-    Returns:
-        Features with sanitized property keys
-    """
-    result = []
-    for feature in features:
-        props = feature.get("properties", {})
-        if props:
-            sanitized = {}
-            for key, value in props.items():
-                # Case-insensitive check for ogc_fid (DuckDB column names are case-insensitive)
-                if key.lower() == "ogc_fid":
-                    sanitized[f"{key}_orig"] = value
-                else:
-                    sanitized[key] = value
-            feature = {**feature, "properties": sanitized}
-        result.append(feature)
-    return result
-
-
-def _geojson_to_arrow_table(features: list[dict]) -> pa.Table | None:
-    """
-    Convert GeoJSON features to PyArrow Table with WKB geometry.
-
-    Uses DuckDB's spatial extension for geometry conversion.
-
-    Args:
-        features: List of GeoJSON feature dicts
-
-    Returns:
-        PyArrow Table with WKB geometry column, or None if empty
-    """
-    if not features:
-        return None
-
-    # Deduplicate property keys (some WFS servers return duplicates like ogc_fid)
-    features = _sanitize_properties(features)
-
-    # Create temporary GeoJSON file for DuckDB
-    geojson_collection = json.dumps(
-        {
-            "type": "FeatureCollection",
-            "features": features,
-        }
+        return _fetch_wfs_page_duckdb(url)
+
+    # Parallel pagination mode for large datasets
+    if total_count is None:
+        warn("Cannot determine feature count; falling back to single request mode.")
+        url = _build_wfs_url(
+            service_url, typename, version, max_features=max_features, bbox=bbox, crs=crs
+        )
+        return _fetch_wfs_page_duckdb(url)
+
+    # Calculate page ranges
+    effective_total = max_features if max_features else total_count
+    num_pages = (effective_total + page_size - 1) // page_size
+    actual_workers = min(max_workers, num_pages)
+
+    progress(
+        f"Fetching {effective_total:,} features in {num_pages} pages using {actual_workers} workers..."
     )
 
-    con = get_duckdb_connection(load_spatial=True, load_httpfs=False)
-    temp_dir = tempfile.gettempdir()
-    temp_file = os.path.join(temp_dir, f"wfs_page_{uuid.uuid4()}.geojson")
-
-    try:
-        with open(temp_file, "w") as f:
-            f.write(geojson_collection)
-
-        # Get columns to build dynamic EXCLUDE clause
-        # (OGC_FID only present in some formats like GML, not GeoJSON)
-        cols_result = con.execute(f"SELECT * FROM ST_Read('{temp_file}') LIMIT 0")
-        columns = [col[0] for col in cols_result.description]
-
-        # Build exclude list - always exclude geom, conditionally exclude OGC_FID
-        exclude_cols = ["geom"]
-        if "OGC_FID" in columns:
-            exclude_cols.append("OGC_FID")
-        exclude_clause = ", ".join(exclude_cols)
-
-        # Read GeoJSON and convert geometry to WKB
-        query = f"""
-            SELECT
-                ST_AsWKB(geom) as geometry,
-                * EXCLUDE ({exclude_clause})
-            FROM ST_Read('{temp_file}')
-        """
-
-        result = con.execute(query).arrow()
-        return result.read_all()
-
-    finally:
-        con.close()
-        if os.path.exists(temp_file):
-            os.unlink(temp_file)
-
-
-def _sanitize_filename(typename: str) -> str:
-    """
-    Sanitize a typename for use in temp filenames.
-
-    Removes path traversal patterns and unsafe characters.
-
-    Args:
-        typename: Layer typename from WFS
-
-    Returns:
-        Safe filename component
-    """
-    # Remove namespace prefix and any path-like components
-    name = typename.split(":")[-1] if ":" in typename else typename
-
-    # Remove path traversal patterns
-    name = name.replace("..", "")
-    name = name.replace("/", "_")
-    name = name.replace("\\", "_")
-
-    # Only keep alphanumeric and underscore
-    safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", name)
-
-    # Ensure it has meaningful content (not just underscores)
-    # Strip underscores to check if any alphanumeric content remains
-    has_content = safe_name.strip("_")
-    return safe_name if has_content else "layer"
-
-
-def _gml_to_arrow_table(content: bytes, typename: str) -> pa.Table | None:
-    """
-    Convert GML response to PyArrow Table with WKB geometry.
-
-    Uses DuckDB's GDAL-based ST_Read for GML parsing.
-
-    Args:
-        content: Raw GML bytes
-        typename: Layer typename (used for temp file naming)
-
-    Returns:
-        PyArrow Table with WKB geometry column, or None if empty
-    """
-    if not content or len(content) < 100:
-        return None
-
-    con = get_duckdb_connection(load_spatial=True, load_httpfs=False)
-    # Use .xml extension - DuckDB/GDAL can auto-detect GML
-    safe_name = _sanitize_filename(typename)
-    temp_dir = tempfile.gettempdir()
-    temp_file = os.path.join(temp_dir, f"wfs_gml_{safe_name}_{uuid.uuid4()}.xml")
-
-    try:
-        with open(temp_file, "wb") as f:
-            f.write(content)
-
-        # Read GML and convert geometry to WKB
-        query = f"""
-            SELECT
-                ST_AsWKB(geom) as geometry,
-                * EXCLUDE (geom, OGC_FID)
-            FROM ST_Read('{temp_file}')
-        """
-
-        result = con.execute(query).arrow()
-        table = result.read_all()
-
-        # Check if we got any rows
-        if table.num_rows == 0:
-            return None
-
-        return table
-
-    except Exception as e:
-        debug(f"GML parsing error: {e}")
-        # Try to provide helpful error message
-        if "unsupported" in str(e).lower() or "driver" in str(e).lower():
-            raise WFSError(
-                f"Could not parse GML response. The format may not be supported.\n"
-                f"Try using --output-format with a GeoJSON option if available.\n"
-                f"Error: {e}"
-            ) from e
-        raise
-
-    finally:
-        con.close()
-        if os.path.exists(temp_file):
-            os.unlink(temp_file)
-
-
-def _parse_response_to_table(
-    content: bytes,
-    typename: str,
-) -> pa.Table | None:
-    """
-    Parse WFS response (GeoJSON or GML) to Arrow table.
-
-    Args:
-        content: Raw response bytes
-        typename: Layer typename
-
-    Returns:
-        PyArrow Table or None if empty
-
-    Raises:
-        WFSError: If response is a WFS exception report
-    """
-    # Check for WFS exception response first
-    exception_msg = _check_wfs_exception(content)
-    if exception_msg:
-        raise WFSError(f"WFS server error: {exception_msg}")
-
-    if _is_geojson_response(content):
-        features = _parse_geojson_features(content)
-        return _geojson_to_arrow_table(features)
-    else:
-        return _gml_to_arrow_table(content, typename)
-
-
-def _stream_features_to_parquet(
-    service_url: str,
-    layer_info: WFSLayerInfo,
-    output_path: str,
-    version: str = "1.1.0",
-    output_format: str | None = None,
-    bbox: tuple[float, float, float, float] | None = None,
-    use_server_bbox: bool = True,
-    crs: str | None = None,
-    max_features: int | None = None,
-    page_size: int = DEFAULT_PAGE_SIZE,
-    max_workers: int = 1,
-) -> int:
-    """
-    Stream WFS features to a Parquet file page by page.
-
-    Memory-efficient: only keeps one page in memory at a time.
-
-    Args:
-        service_url: WFS service URL
-        layer_info: Layer metadata
-        output_path: Output Parquet file path
-        version: WFS version
-        output_format: Requested output format
-        bbox: Bounding box filter
-        use_server_bbox: Whether to apply bbox server-side
-        crs: CRS for requests
-        max_features: Maximum total features
-        page_size: Features per page
-        max_workers: Concurrent workers
-
-    Returns:
-        Number of features written
-    """
-    writer = None
-    target_schema = None
-    total_rows = 0
-    page_count = 0
-
-    try:
-        for content in fetch_all_features(
+    # Build page URLs
+    pages = []
+    for i in range(num_pages):
+        start = i * page_size
+        remaining = effective_total - start
+        count = min(page_size, remaining)
+        if count <= 0:
+            break
+        url = _build_wfs_url(
             service_url,
-            layer_info,
-            version=version,
-            output_format=output_format,
+            typename,
+            version,
+            max_features=count,
+            start_index=start,
             bbox=bbox,
-            use_server_bbox=use_server_bbox,
             crs=crs,
-            max_features=max_features,
-            page_size=page_size,
-            max_workers=max_workers,
-        ):
-            # Parse this page
-            page_table = _parse_response_to_table(content, layer_info.typename)
-            if page_table is None or page_table.num_rows == 0:
-                continue
+        )
+        pages.append((i, start, url))
 
-            page_count += 1
+    # Fetch pages in parallel
+    results = {}
+    with ThreadPoolExecutor(max_workers=actual_workers) as executor:
+        future_to_page = {
+            executor.submit(_fetch_wfs_page_duckdb, url): (page_num, start)
+            for page_num, start, url in pages
+        }
 
-            # Initialize schema from first page
-            if target_schema is None:
-                target_schema = page_table.schema
-                writer = pq.ParquetWriter(output_path, target_schema)
+        for future in as_completed(future_to_page):
+            page_num, start = future_to_page[future]
+            try:
+                table = future.result()
+                results[page_num] = table
+                debug(f"Page {page_num + 1}/{num_pages}: {table.num_rows:,} features")
+            except Exception as e:
+                raise WFSError(f"Failed to fetch page {page_num + 1} (offset {start}): {e}") from e
 
-            # Cast to fixed schema if needed
-            if page_table.schema != target_schema:
-                try:
-                    page_table = page_table.cast(target_schema, safe=True)
-                except pa.ArrowInvalid as e:
-                    raise WFSError(
-                        f"Schema mismatch in page {page_count}. "
-                        f"This may indicate inconsistent data from the WFS service. "
-                        f"Error: {e}"
-                    ) from e
+    # Combine tables in order
+    if not results:
+        raise WFSError("No features returned from WFS service.")
 
-            assert writer is not None  # Initialized above with target_schema
-            writer.write_table(page_table)
-            total_rows += page_table.num_rows
+    tables = [results[i] for i in sorted(results.keys())]
+    combined = pa.concat_tables(tables)
+    debug(f"Combined {len(tables)} pages: {combined.num_rows:,} total features")
 
-            # Free memory
-            del page_table
-
-        debug(f"Streamed {total_rows:,} features in {page_count} pages")
-        return total_rows
-
-    finally:
-        if writer is not None:
-            writer.close()
+    return combined
 
 
 def wfs_to_table(
@@ -1615,8 +963,8 @@ def wfs_to_table(
     bbox_mode: str = "auto",
     output_crs: str | None = None,
     limit: int | None = None,
-    page_size: int = DEFAULT_PAGE_SIZE,
     max_workers: int = 1,
+    page_size: int = 10000,
     verbose: bool = False,
 ) -> pa.Table:
     """
@@ -1627,6 +975,9 @@ def wfs_to_table(
     - JSON parsing happens in DuckDB (faster than Python json)
     - Geometry conversion happens in-database (no temp files)
 
+    For very large datasets (1M+ features), use max_workers > 1 to enable
+    parallel pagination, which splits the request into smaller chunks.
+
     Args:
         service_url: WFS service URL
         typename: Layer typename
@@ -1635,8 +986,8 @@ def wfs_to_table(
         bbox_mode: Bbox strategy ("auto", "server", "local")
         output_crs: Request specific CRS (e.g., "EPSG:4326")
         limit: Maximum features to fetch
-        page_size: Features per request
-        max_workers: Concurrent requests (1 = sequential)
+        max_workers: Parallel requests for large datasets (default: 1 = single request)
+        page_size: Features per page when using parallel mode (default: 10000)
         verbose: Enable debug output
 
     Returns:
@@ -1666,7 +1017,8 @@ def wfs_to_table(
         use_server_bbox = _determine_bbox_strategy(bbox_mode, layer_info)
 
     # Use DuckDB-native streaming for fast extraction
-    # This is 10x+ faster than Python HTTP streaming
+    # Single request mode is 10x+ faster than Python HTTP
+    # Parallel mode is useful for very large datasets (1M+ features)
     table = fetch_all_features_duckdb(
         service_url=service_url,
         typename=layer_info.typename,
@@ -1674,6 +1026,8 @@ def wfs_to_table(
         max_features=limit,
         bbox=bbox if use_server_bbox else None,
         crs=crs,
+        max_workers=max_workers,
+        page_size=page_size,
     )
 
     if table.num_rows == 0:
@@ -1725,8 +1079,8 @@ def convert_wfs_to_geoparquet(
     bbox_mode: str = "auto",
     output_crs: str | None = None,
     limit: int | None = None,
-    page_size: int = DEFAULT_PAGE_SIZE,
     max_workers: int = 1,
+    page_size: int = 10000,
     skip_hilbert: bool = False,
     skip_bbox: bool = False,
     compression: str = "ZSTD",
@@ -1749,8 +1103,8 @@ def convert_wfs_to_geoparquet(
         bbox_mode: Bbox strategy
         output_crs: Request specific CRS
         limit: Maximum features
-        page_size: Features per request
-        max_workers: Concurrent workers
+        max_workers: Parallel requests for large datasets (default: 1)
+        page_size: Features per page when using parallel mode (default: 10000)
         skip_hilbert: Skip Hilbert curve sorting
         skip_bbox: Skip adding bbox column
         compression: Compression algorithm
@@ -1777,8 +1131,8 @@ def convert_wfs_to_geoparquet(
         bbox_mode=bbox_mode,
         output_crs=output_crs,
         limit=limit,
-        page_size=page_size,
         max_workers=max_workers,
+        page_size=page_size,
         verbose=verbose,
     )
 

@@ -2706,13 +2706,6 @@ def extract_bigquery_cmd(
     "'server' forces server-side filtering, 'local' forces client-side filtering",
 )
 @click.option(
-    "--bbox-threshold",
-    type=click.IntRange(0, None),
-    default=10000,
-    help="Feature count threshold for auto bbox mode. Layers with more features "
-    "use server-side filtering if supported. Default: 10000",
-)
-@click.option(
     "--limit",
     type=click.IntRange(0, None),
     help="Maximum number of features to extract. Must be non-negative.",
@@ -2722,16 +2715,17 @@ def extract_bigquery_cmd(
     help="Request specific CRS from server (e.g., EPSG:4326, urn:ogc:def:crs:EPSG::4326)",
 )
 @click.option(
-    "--batch-size",
-    type=click.IntRange(1, None),
-    default=1000,
-    help="Number of features per request page. Default: 1000",
-)
-@click.option(
     "--workers",
     type=click.IntRange(min=1, max=10),
     default=1,
-    help="Number of concurrent requests (1-10). Default: 1 (sequential). Values 2-3 recommended for speedup. Higher values may trigger rate limits.",
+    help="Parallel requests for large datasets. Default: 1 (single streaming request). "
+    "Use 2-4 for datasets with 1M+ features to avoid timeouts.",
+)
+@click.option(
+    "--page-size",
+    type=click.IntRange(1000, 100000),
+    default=10000,
+    help="Features per page when using --workers > 1. Default: 10000.",
 )
 @click.option(
     "--skip-hilbert",
@@ -2756,11 +2750,10 @@ def extract_wfs_cmd(
     wfs_version,
     bbox,
     bbox_mode,
-    bbox_threshold,
     limit,
     output_crs,
-    batch_size,
     workers,
+    page_size,
     skip_hilbert,
     skip_bbox,
     compression,
@@ -2879,8 +2872,8 @@ def extract_wfs_cmd(
             bbox_mode=bbox_mode,
             output_crs=output_crs,
             limit=limit,
-            page_size=batch_size,
             max_workers=workers,
+            page_size=page_size,
             skip_hilbert=skip_hilbert,
             skip_bbox=skip_bbox,
             compression=compression.upper(),

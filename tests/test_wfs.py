@@ -11,22 +11,15 @@ import pytest
 
 # Module-level imports for WFS functions (avoids per-test imports)
 from geoparquet_io.core.wfs import (
-    MAX_RECOMMENDED_WORKERS,
     WFSError,
     WFSLayerInfo,
     _build_bbox_param,
     _build_local_bbox_filter,
-    _count_features_in_response,
     _detect_best_output_format,
     _determine_bbox_strategy,
-    _is_geojson_response,
     _negotiate_crs,
     _normalize_crs,
-    _response_has_features,
-    _sanitize_filename,
-    _sanitize_properties,
     _validate_identifier,
-    fetch_all_features,
     get_layer_info,
     get_wfs_capabilities,
     list_available_layers,
@@ -577,59 +570,6 @@ class TestCapabilityParsing:
             get_wfs_capabilities("http://mock.wfs.server/wfs")
 
 
-class TestGeometryParsing:
-    """Tests for GeoJSON to Arrow table conversion using internal functions."""
-
-    def test_geojson_to_arrow_table(self, mock_geojson_response):
-        """Test conversion of GeoJSON features to Arrow table."""
-        from geoparquet_io.core.wfs import _geojson_to_arrow_table
-
-        features = mock_geojson_response["features"]
-        table = _geojson_to_arrow_table(features)
-
-        # Should have 3 rows (3 features in mock)
-        assert table is not None
-        assert table.num_rows == 3
-
-        # Should have expected columns
-        column_names = table.column_names
-        assert "name" in column_names
-        assert "population" in column_names
-
-    def test_geojson_extracts_geometry(self, mock_geojson_response):
-        """Test that geometry column is extracted."""
-        from geoparquet_io.core.wfs import _geojson_to_arrow_table
-
-        features = mock_geojson_response["features"]
-        table = _geojson_to_arrow_table(features)
-
-        # Should have geometry column
-        assert table is not None
-        assert "geometry" in table.column_names
-
-    def test_empty_features_returns_none(self):
-        """Test that empty feature list returns None."""
-        from geoparquet_io.core.wfs import _geojson_to_arrow_table
-
-        table = _geojson_to_arrow_table([])
-        assert table is None
-
-    def test_is_geojson_response_detection(self):
-        """Test GeoJSON response detection."""
-        from geoparquet_io.core.wfs import _is_geojson_response
-
-        # Valid GeoJSON
-        geojson = b'{"type": "FeatureCollection", "features": []}'
-        assert _is_geojson_response(geojson) is True
-
-        # XML/GML response
-        gml = b'<?xml version="1.0"?><wfs:FeatureCollection>'
-        assert _is_geojson_response(gml) is False
-
-        # Invalid content
-        assert _is_geojson_response(b"not json") is False
-
-
 class TestErrorHandling:
     """Tests for error handling in WFS module."""
 
@@ -653,29 +593,6 @@ class TestErrorHandling:
 
         with pytest.raises(WFSError, match="not found"):
             get_layer_info("http://mock.wfs.server/wfs", "nonexistent:data")
-
-    def test_invalid_max_workers_raises_error(self):
-        """Test that invalid max_workers value raises error."""
-        from geoparquet_io.core.wfs import WFSLayerInfo
-
-        layer_info = WFSLayerInfo(
-            typename="test:layer",
-            title="Test",
-            crs_list=["EPSG:4326"],
-            default_crs="EPSG:4326",
-            bbox=None,
-            geometry_column="geometry",
-            available_formats=["application/json"],
-        )
-
-        with pytest.raises(ValueError, match="max_workers must be at least 1"):
-            list(
-                fetch_all_features(
-                    "http://example.com/wfs",
-                    layer_info,
-                    max_workers=0,
-                )
-            )
 
 
 # Helper Data Structures for Tests
@@ -1031,35 +948,6 @@ class TestNamespaceResolution:
     """Test typename namespace matching and sanitization logic."""
 
     @pytest.mark.parametrize(
-        "typename,expected_safe",
-        [
-            ("test:cities", "cities"),
-            ("namespace:layer_name", "layer_name"),
-            ("cities", "cities"),  # No namespace
-            ("ns:my-layer", "my_layer"),  # Special chars sanitized
-            ("../../../etc/passwd", "___etc_passwd"),  # Path traversal removed, slashes to _
-            ("test:layer/sublayer", "layer_sublayer"),  # Namespace stripped, slash to _
-        ],
-    )
-    def test_sanitize_filename(self, typename, expected_safe):
-        """Typename sanitization removes unsafe characters."""
-        result = _sanitize_filename(typename)
-        # Verify expected sanitized value
-        assert result == expected_safe
-        # Should not contain path separators or traversal patterns
-        assert ".." not in result
-        assert "/" not in result
-        assert "\\" not in result
-
-    def test_empty_typename_returns_layer(self):
-        """Empty or invalid typename returns default 'layer'."""
-        result = _sanitize_filename("")
-        assert result == "layer"
-
-        result = _sanitize_filename("...")
-        assert result == "layer"
-
-    @pytest.mark.parametrize(
         "column_name,should_pass",
         [
             ("geometry", True),
@@ -1079,84 +967,6 @@ class TestNamespaceResolution:
         else:
             with pytest.raises(WFSError, match="Invalid geometry column name"):
                 _validate_identifier(column_name)
-
-
-# =============================================================================
-# Unit Tests - Bbox Parsing (Reused from common.py)
-# =============================================================================
-
-
-class TestResponseParsing:
-    """Test response parsing and feature counting helpers."""
-
-    def test_is_geojson_response_valid(self):
-        """Detect valid GeoJSON responses."""
-        geojson = b'{"type": "FeatureCollection", "features": []}'
-        assert _is_geojson_response(geojson) is True
-
-    def test_is_geojson_response_gml(self):
-        """GML responses are not GeoJSON."""
-        gml = b'<?xml version="1.0"?><wfs:FeatureCollection>'
-        assert _is_geojson_response(gml) is False
-
-    def test_is_geojson_response_invalid(self):
-        """Invalid content is not GeoJSON."""
-        assert _is_geojson_response(b"not json") is False
-        assert _is_geojson_response(b"") is False
-
-    def test_response_has_features_geojson_with_features(self):
-        """GeoJSON with features returns True."""
-        import json
-
-        content = json.dumps(
-            {
-                "type": "FeatureCollection",
-                "features": [{"type": "Feature", "geometry": None, "properties": {}}],
-            }
-        ).encode()
-        assert _response_has_features(content) is True
-
-    def test_response_has_features_empty_geojson(self):
-        """Empty GeoJSON FeatureCollection returns False."""
-        import json
-
-        content = json.dumps(
-            {
-                "type": "FeatureCollection",
-                "features": [],
-            }
-        ).encode()
-        assert _response_has_features(content) is False
-
-    def test_response_has_features_gml_empty(self):
-        """GML with numberOfFeatures=0 returns False."""
-        gml = b'<?xml version="1.0"?><wfs:FeatureCollection numberOfFeatures="0"></wfs:FeatureCollection>'
-        assert _response_has_features(gml) is False
-
-    def test_count_features_geojson(self):
-        """Count features in GeoJSON response."""
-        import json
-
-        content = json.dumps(
-            {
-                "type": "FeatureCollection",
-                "features": [
-                    {"type": "Feature", "geometry": None, "properties": {"id": 1}},
-                    {"type": "Feature", "geometry": None, "properties": {"id": 2}},
-                    {"type": "Feature", "geometry": None, "properties": {"id": 3}},
-                ],
-            }
-        ).encode()
-        assert _count_features_in_response(content) == 3
-
-    def test_count_features_empty(self):
-        """Empty content returns 0."""
-        assert _count_features_in_response(b"") == 0
-
-    def test_count_features_gml_attribute(self):
-        """GML with numberOfFeatures attribute."""
-        gml = b'<wfs:FeatureCollection numberOfFeatures="42"></wfs:FeatureCollection>'
-        assert _count_features_in_response(gml) == 42
 
 
 # =============================================================================
@@ -1254,87 +1064,17 @@ class TestWFSCLIErgonomics:
         assert "--max-workers" not in result.output
 
     def test_workers_capped_at_10(self):
-        """Workers should be capped at 10 like ArcGIS."""
-        # MAX_RECOMMENDED_WORKERS should be 10
-        assert MAX_RECOMMENDED_WORKERS == 10
+        """Workers should be capped at 10 in CLI validation."""
+        from click.testing import CliRunner
 
+        from geoparquet_io.cli.main import cli
 
-class TestOgcFidSanitization:
-    """Test ogc_fid column collision handling."""
-
-    def test_sanitize_renames_ogc_fid_lowercase(self):
-        """ogc_fid property should be renamed to avoid DuckDB collision."""
-        features = [
-            {
-                "type": "Feature",
-                "id": "1",
-                "geometry": {"type": "Point", "coordinates": [0, 0]},
-                "properties": {"ogc_fid": 123, "name": "Test"},
-            }
-        ]
-
-        result = _sanitize_properties(features)
-
-        # ogc_fid should be renamed to ogc_fid_orig
-        assert "ogc_fid" not in result[0]["properties"]
-        assert "ogc_fid_orig" in result[0]["properties"]
-        assert result[0]["properties"]["ogc_fid_orig"] == 123
-        assert result[0]["properties"]["name"] == "Test"
-
-    def test_sanitize_renames_ogc_fid_uppercase(self):
-        """OGC_FID property should also be renamed."""
-        features = [
-            {
-                "type": "Feature",
-                "id": "1",
-                "geometry": {"type": "Point", "coordinates": [0, 0]},
-                "properties": {"OGC_FID": 456, "name": "Test"},
-            }
-        ]
-
-        result = _sanitize_properties(features)
-
-        assert "OGC_FID" not in result[0]["properties"]
-        assert "OGC_FID_orig" in result[0]["properties"]
-        assert result[0]["properties"]["OGC_FID_orig"] == 456
-
-    def test_sanitize_renames_ogc_fid_mixed_case(self):
-        """Mixed case variations like Ogc_Fid should also be renamed.
-
-        This is critical - some WFS servers return mixed-case column names,
-        and DuckDB column name comparison is case-insensitive for collisions.
-        """
-        features = [
-            {
-                "type": "Feature",
-                "id": "1",
-                "geometry": {"type": "Point", "coordinates": [0, 0]},
-                "properties": {"Ogc_Fid": 789, "name": "Test"},
-            }
-        ]
-
-        result = _sanitize_properties(features)
-
-        # Should be renamed regardless of case
-        assert "Ogc_Fid" not in result[0]["properties"]
-        assert "Ogc_Fid_orig" in result[0]["properties"]
-        assert result[0]["properties"]["Ogc_Fid_orig"] == 789
-
-    def test_sanitize_preserves_other_properties(self):
-        """Non-ogc_fid properties should be preserved unchanged."""
-        features = [
-            {
-                "type": "Feature",
-                "id": "1",
-                "geometry": {"type": "Point", "coordinates": [0, 0]},
-                "properties": {"name": "Test", "value": 42},
-            }
-        ]
-
-        result = _sanitize_properties(features)
-
-        assert result[0]["properties"]["name"] == "Test"
-        assert result[0]["properties"]["value"] == 42
+        runner = CliRunner()
+        result = runner.invoke(cli, ["extract", "wfs", "--help"])
+        # Should have --workers option with max of 10
+        assert "--workers" in result.output
+        # Click displays IntRange as [1<=x<=10]
+        assert "[1<=x<=10]" in result.output
 
 
 # =============================================================================
