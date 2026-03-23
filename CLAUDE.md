@@ -72,7 +72,7 @@ geoparquet_io/
     └── stac.py          # STAC metadata API
 ```
 
-<!-- freshness: last-verified: 2026-03-20, maps-to: geoparquet_io/cli/main.py -->
+<!-- freshness: last-verified: 2026-03-23, maps-to: geoparquet_io/cli/main.py -->
 <!-- BEGIN GENERATED: cli-commands -->
 ### CLI Command Groups
 
