@@ -97,6 +97,7 @@ geoparquet_io/
 | `common.py` |  | 4036 |
 | `validate.py` | GeoParquet file validation against specification r... | 2854 |
 | `inspect_utils.py` | Utilities for inspecting GeoParquet files. | 1548 |
+| `wfs.py` | WFS (Web Feature Service) to GeoParquet conversion... | 1385 |
 | `convert.py` |  | 1300 |
 | `duckdb_metadata.py` | DuckDB-based Parquet metadata extraction. | 1277 |
 | `arcgis.py` | ArcGIS Feature Service to GeoParquet conversion. | 1226 |
@@ -108,8 +109,7 @@ geoparquet_io/
 | `benchmark.py` | Benchmark utilities for comparing GeoParquet conve... | 701 |
 | `partition_admin_hierarchical.py` |  | 698 |
 | `upload.py` | Upload GeoParquet files to cloud object storage. | 675 |
-| `geojson_stream.py` | GeoJSON conversion for GeoParquet files. | 667 |
-| ... | *36 more modules* | |
+| ... | *37 more modules* | |
 <!-- END GENERATED: core-modules -->
 
 <!-- freshness: last-verified: 2026-03-20, maps-to: geoparquet_io/core/common.py, geoparquet_io/cli/decorators.py -->
