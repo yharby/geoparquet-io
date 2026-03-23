@@ -108,16 +108,24 @@ def _build_bbox_filter_wfs(bbox, use_server_side, geometry_column) -> tuple[str 
 
 ```python
 def fetch_features_page(service_url, typename, version, offset, page_size, ...) -> dict | str
-def fetch_all_features(...) -> Generator[dict | str, None, None]
+def fetch_all_features(..., max_workers: int = 1) -> Generator[dict | str, None, None]
 ```
 
 **Pagination parameters:**
 - WFS 1.1.0: `startIndex` + `maxFeatures`
 - Progress tracking: "Fetching features 1-1000 of ??? ..." (try `resultType=hits` for count)
 
+**Parallel fetching (reuse ArcGIS pattern):**
+- `max_workers` parameter: 1 = sequential (default), 2-3 recommended for speed
+- Uses `ThreadPoolExecutor` to submit N requests simultaneously
+- Collects and sorts results by offset to maintain ordering
+- Yields pages sequentially for streaming to Parquet
+- Fail-fast on errors (propagate first failure)
+
 **Reuse from ArcGIS:**
 - Generator pattern yielding pages
 - Progress reporting with `progress()` logging helper
+- `ThreadPoolExecutor` parallel fetching pattern (lines 640-714 in arcgis.py)
 
 ### 6. Geometry Parsing (Multi-Format)
 
@@ -218,6 +226,7 @@ gpio extract wfs <service_url> <typename> <output_file> [OPTIONS]
 @click.option("--limit", type=int, help="Max features to extract")
 @click.option("--output-crs", help="Request specific CRS (e.g., EPSG:4326)")
 @click.option("--batch-size", type=int, default=1000, help="Page size")
+@click.option("--max-workers", type=int, default=1, help="Concurrent requests (1=sequential, 2-3 recommended)")
 @click.option("--skip-hilbert", is_flag=True)
 @click.option("--skip-bbox", is_flag=True)
 @compression_options  # Standard decorator
@@ -277,6 +286,7 @@ def from_wfs(
     version: str = "1.1.0",
     bbox: tuple[float, float, float, float] | None = None,
     limit: int | None = None,
+    max_workers: int = 1,
 ) -> pa.Table:
     """Fetch WFS layer as PyArrow Table."""
 ```
