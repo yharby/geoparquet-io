@@ -772,28 +772,49 @@ def _fetch_wfs_page_duckdb(url: str) -> pa.Table:
 
     # Use DuckDB to fetch and parse the WFS GeoJSON in one query
     # This streams the HTTP response and parses JSON directly
-    # Step 1: Unnest features and extract geometry + properties struct
-    # Step 2: Expand properties struct into individual columns
-    query = f"""
-        WITH features AS (
-            SELECT unnest(features) AS feature
-            FROM read_json_auto('{safe_url}', maximum_object_size=536870912)
-        ),
-        extracted AS (
-            SELECT
-                ST_AsWKB(ST_GeomFromGeoJSON(feature.geometry)) AS geometry,
-                feature.properties AS props
-            FROM features
-        )
-        SELECT
-            geometry,
-            unnest(props)
-        FROM extracted
+    # Step 1: Check for empty features array (DuckDB can't UNNEST empty JSON arrays)
+    # Step 2: Unnest features and extract geometry + properties struct
+    # Step 3: Expand properties struct into individual columns
+    #
+    # Note: When features is [] (empty), read_json_auto infers it as JSON type
+    # rather than a list, causing UNNEST to fail. We handle this by first
+    # checking the feature count.
+    count_query = f"""
+        SELECT len(features) AS cnt
+        FROM read_json_auto('{safe_url}', maximum_object_size=536870912)
     """
 
     try:
         debug(f"DuckDB fetch: {url[:80]}...")
         start_time = time.time()
+
+        # Check if response has any features
+        count_result = con.execute(count_query).fetchone()
+        feature_count = count_result[0] if count_result else 0
+
+        if feature_count == 0:
+            # Return empty table with just geometry column
+            debug("Empty response, returning empty table")
+            return pa.table({"geometry": pa.array([], type=pa.binary())})
+
+        # Full query to extract features
+        query = f"""
+            WITH features AS (
+                SELECT unnest(features) AS feature
+                FROM read_json_auto('{safe_url}', maximum_object_size=536870912)
+            ),
+            extracted AS (
+                SELECT
+                    ST_AsWKB(ST_GeomFromGeoJSON(feature.geometry)) AS geometry,
+                    feature.properties AS props
+                FROM features
+            )
+            SELECT
+                geometry,
+                unnest(props)
+            FROM extracted
+        """
+
         result = con.execute(query)
         table = result.arrow().read_all()
         elapsed = time.time() - start_time
@@ -1031,10 +1052,15 @@ def wfs_to_table(
     )
 
     if table.num_rows == 0:
-        raise WFSError(
-            f"No features returned from WFS service for layer '{typename}'.\n"
-            "Check that the layer exists and the bbox (if specified) intersects data."
-        )
+        if bbox:
+            # Empty results with bbox filter is valid - just no features in that area
+            warn(f"No features found in bbox for layer '{typename}'. Writing empty file.")
+        else:
+            # Empty results without bbox likely indicates a problem
+            raise WFSError(
+                f"No features returned from WFS service for layer '{typename}'.\n"
+                "Check that the layer exists and is not empty."
+            )
 
     # Apply local bbox filter if needed
     if bbox and not use_server_bbox:
