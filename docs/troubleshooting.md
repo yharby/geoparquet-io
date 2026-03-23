@@ -292,6 +292,29 @@ gpio inspect file.parquet --stats
 gpio convert data.csv output.parquet --skip-invalid
 ```
 
+### CSV "Maximum line size exceeded" Error
+
+**Symptom**: `Maximum line size of X bytes exceeded` when converting CSV with large WKT geometries.
+
+**Cause**: WKT geometries (complex polygons, coastlines) can exceed line size limits.
+
+**Solutions**:
+
+1. **Use `--csv-max-line-size`** to increase the limit:
+```bash
+gpio convert data.csv output.parquet --csv-max-line-size 100000000  # 100MB
+```
+
+2. **Set environment variable** for persistent override:
+```bash
+export GPIO_CSV_MAX_LINE_SIZE=100000000
+gpio convert data.csv output.parquet
+```
+
+Default is 50MB. Increase if your WKT geometries are larger.
+
+**Note**: Large values increase memory usage during CSV parsing. On memory-constrained systems, avoid setting excessively high limits.
+
 ## Getting Help
 
 ### Debug Information

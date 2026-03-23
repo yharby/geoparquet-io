@@ -1095,6 +1095,12 @@ def convert(ctx):
     help="CSV/TSV: Skip rows with invalid geometries instead of failing",
 )
 @click.option(
+    "--csv-max-line-size",
+    type=int,
+    default=None,
+    help="CSV/TSV: Maximum line size in bytes (default: 50MB). Increase for very large WKT geometries.",
+)
+@click.option(
     "--allow-no-geometry",
     is_flag=True,
     help="Allow conversion to plain Parquet when no geometry column is detected (default: error)",
@@ -1115,6 +1121,7 @@ def convert_to_geoparquet_cmd(
     delimiter,
     crs,
     skip_invalid,
+    csv_max_line_size,
     allow_no_geometry,
     geoparquet_version,
     verbose,
@@ -1143,11 +1150,16 @@ def convert_to_geoparquet_cmd(
       # Pipe to another command (auto-streams when piped)
       gpio convert input.gpkg | gpio add bbox - | gpio upload - s3://bucket/data.parquet
     """
+    from geoparquet_io.core.convert import set_csv_max_line_size
     from geoparquet_io.core.streaming import (
         StreamingError,
         should_stream_output,
         validate_output,
     )
+
+    # Set CSV max line size if specified
+    if csv_max_line_size is not None:
+        set_csv_max_line_size(csv_max_line_size)
 
     # Validate output early - provides helpful error if no output and not piping
     try:

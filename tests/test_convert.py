@@ -109,6 +109,43 @@ def csv_mixed_geoms_input(test_data_dir):
 
 
 @pytest.fixture
+def csv_large_wkt_input(tmp_path):
+    """Create a CSV with WKT geometry exceeding DuckDB's default 2MB line limit.
+
+    This tests that gpio can handle geospatial CSVs with very large WKT strings,
+    such as complex polygons with many vertices (coastlines, administrative boundaries).
+    """
+    import math
+
+    # Generate a polygon with enough vertices to exceed 2MB
+    # Each coordinate pair like "0.123456 0.654321," is ~20 bytes
+    # Need ~100,000 coordinate pairs to reach 2MB
+    num_vertices = 120_000
+
+    coords = []
+    for i in range(num_vertices):
+        # Create a circle-ish polygon
+        angle = 2 * math.pi * i / num_vertices
+        x = round(4.9 + 0.1 * math.cos(angle), 7)
+        y = round(52.3 + 0.1 * math.sin(angle), 7)
+        coords.append(f"{x} {y}")
+
+    # Close the polygon
+    coords.append(coords[0])
+
+    wkt = f"POLYGON(({','.join(coords)}))"
+
+    # Verify we exceed 2MB
+    assert len(wkt) > 2_000_000, f"WKT is only {len(wkt)} bytes, need >2MB"
+
+    csv_path = tmp_path / "large_wkt.csv"
+    # Quote the WKT value since it contains commas (coordinate separators)
+    csv_path.write_text(f'id,name,wkt\n1,Large Polygon,"{wkt}"\n')
+
+    return str(csv_path)
+
+
+@pytest.fixture
 def unsorted_parquet_input(test_data_dir):
     """Return path to larger unsorted parquet file (1445 rows, ~115 KB uncompressed)."""
     return str(test_data_dir / "unsorted.parquet")
@@ -597,6 +634,108 @@ class TestConvertCSVCore:
         geom_types = [r[0] for r in result]
         assert len(geom_types) == 2  # Should have both POINT and POLYGON
         con.close()
+
+    def test_convert_csv_large_wkt_exceeding_2mb(self, csv_large_wkt_input, temp_output_file):
+        """Test CSV with WKT geometry exceeding DuckDB's default 2MB line limit.
+
+        Regression test for GitHub issue #301: CSV files with large WKT geometries
+        (like complex polygons from UNESCO world heritage sites) failed with
+        "Maximum line size of 2000000 bytes exceeded" error.
+        """
+        convert_to_geoparquet(csv_large_wkt_input, temp_output_file, verbose=False)
+
+        assert os.path.exists(temp_output_file)
+        assert os.path.getsize(temp_output_file) > 0
+
+        # Verify geometry was parsed correctly
+        con = duckdb.connect()
+        con.execute("INSTALL spatial;")
+        con.execute("LOAD spatial;")
+        result = con.execute(
+            f"SELECT ST_GeometryType(geometry), ST_NPoints(geometry) FROM '{temp_output_file}'"
+        ).fetchone()
+        assert "POLYGON" in result[0]
+        assert result[1] > 100_000  # Should have many vertices
+        con.close()
+
+    def test_convert_csv_large_wkt_with_explicit_delimiter(self, tmp_path, temp_output_file):
+        """Test large WKT with explicit delimiter (tests both branches of _build_csv_read_expr).
+
+        Verifies that max_line_size is applied to both read_csv (explicit delimiter)
+        and read_csv_auto (auto-detect) branches.
+        """
+        import math
+
+        # Create a moderately large WKT (just over default 2MB limit)
+        num_vertices = 110_000
+        coords = []
+        for i in range(num_vertices):
+            angle = 2 * math.pi * i / num_vertices
+            x = round(4.9 + 0.1 * math.cos(angle), 7)
+            y = round(52.3 + 0.1 * math.sin(angle), 7)
+            coords.append(f"{x} {y}")
+        coords.append(coords[0])  # Close polygon
+        wkt = f"POLYGON(({','.join(coords)}))"
+
+        # Create CSV with semicolon delimiter (forces explicit delimiter path)
+        csv_path = tmp_path / "large_wkt_semicolon.csv"
+        csv_path.write_text(f'id;name;wkt\n1;Large Polygon;"{wkt}"\n')
+
+        # Convert with explicit delimiter
+        convert_to_geoparquet(str(csv_path), temp_output_file, delimiter=";", verbose=False)
+
+        assert os.path.exists(temp_output_file)
+        con = duckdb.connect()
+        con.execute("INSTALL spatial;")
+        con.execute("LOAD spatial;")
+        result = con.execute(
+            f"SELECT ST_GeometryType(geometry), ST_NPoints(geometry) FROM '{temp_output_file}'"
+        ).fetchone()
+        assert "POLYGON" in result[0]
+        assert result[1] > 100_000
+        con.close()
+
+    def test_convert_csv_custom_max_line_size_env_var(
+        self, tmp_path, temp_output_file, monkeypatch
+    ):
+        """Test that GPIO_CSV_MAX_LINE_SIZE env var is respected."""
+        from geoparquet_io.core.convert import get_csv_max_line_size, set_csv_max_line_size
+
+        # Reset any override from previous tests
+        set_csv_max_line_size(None)
+
+        # Set custom value via env var
+        custom_size = 100 * 1024 * 1024  # 100MB
+        monkeypatch.setenv("GPIO_CSV_MAX_LINE_SIZE", str(custom_size))
+
+        assert get_csv_max_line_size() == custom_size
+
+        # Reset
+        monkeypatch.delenv("GPIO_CSV_MAX_LINE_SIZE", raising=False)
+        set_csv_max_line_size(None)
+
+    def test_convert_csv_large_wkt_fails_with_small_limit(
+        self, csv_large_wkt_input, temp_output_file
+    ):
+        """Verify that large WKT would fail with DuckDB's default 2MB limit.
+
+        This boundary test proves the fix is necessary by showing the old behavior
+        would have failed. We temporarily set max_line_size to 2MB (DuckDB's default).
+        """
+        from geoparquet_io.core.convert import set_csv_max_line_size
+
+        try:
+            # Set to DuckDB's default 2MB limit
+            set_csv_max_line_size(2 * 1024 * 1024)
+
+            # This should fail with "Maximum line size exceeded"
+            with pytest.raises(Exception) as exc_info:
+                convert_to_geoparquet(csv_large_wkt_input, temp_output_file, verbose=False)
+
+            assert "maximum line size" in str(exc_info.value).lower()
+        finally:
+            # Reset to default
+            set_csv_max_line_size(None)
 
 
 class TestConvertCSVValidation:
