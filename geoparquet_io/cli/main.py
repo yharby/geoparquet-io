@@ -2683,6 +2683,219 @@ def extract_bigquery_cmd(
         raise click.ClickException(str(e)) from e
 
 
+@extract.command(name="wfs")
+@click.argument("service_url")
+@click.argument("typename", required=False)
+@click.argument("output_file", required=False, type=click.Path())
+@click.option(
+    "--version",
+    "wfs_version",
+    default="1.1.0",
+    type=click.Choice(["1.0.0", "1.1.0"]),
+    help="WFS protocol version",
+)
+@click.option(
+    "--bbox",
+    help="Bounding box: xmin,ymin,xmax,ymax in WGS84",
+)
+@click.option(
+    "--bbox-mode",
+    type=click.Choice(["auto", "server", "local"]),
+    default="auto",
+    help="Bbox filter mode: 'auto' (default) chooses based on server capabilities, "
+    "'server' forces server-side filtering, 'local' forces client-side filtering",
+)
+@click.option(
+    "--bbox-threshold",
+    type=click.IntRange(0, None),
+    default=10000,
+    help="Feature count threshold for auto bbox mode. Layers with more features "
+    "use server-side filtering if supported. Default: 10000",
+)
+@click.option(
+    "--limit",
+    type=click.IntRange(0, None),
+    help="Maximum number of features to extract. Must be non-negative.",
+)
+@click.option(
+    "--output-crs",
+    help="Request specific CRS from server (e.g., EPSG:4326, urn:ogc:def:crs:EPSG::4326)",
+)
+@click.option(
+    "--batch-size",
+    type=click.IntRange(1, None),
+    default=1000,
+    help="Number of features per request page. Default: 1000",
+)
+@click.option(
+    "--max-workers",
+    type=click.IntRange(1, None),
+    default=1,
+    help="Concurrent requests (1=sequential, 2-3 recommended for most servers). Default: 1",
+)
+@click.option(
+    "--skip-hilbert",
+    is_flag=True,
+    help="Skip Hilbert curve sorting (faster, but no spatial clustering)",
+)
+@click.option(
+    "--skip-bbox",
+    is_flag=True,
+    help="Skip adding bbox column (faster, but no per-geometry bbox)",
+)
+@compression_options
+@row_group_options
+@geoparquet_version_option
+@overwrite_option
+@verbose_option
+@any_extension_option
+def extract_wfs_cmd(
+    service_url,
+    typename,
+    output_file,
+    wfs_version,
+    bbox,
+    bbox_mode,
+    bbox_threshold,
+    limit,
+    output_crs,
+    batch_size,
+    max_workers,
+    skip_hilbert,
+    skip_bbox,
+    compression,
+    compression_level,
+    row_group_size,
+    row_group_size_mb,
+    write_memory,
+    geoparquet_version,
+    overwrite,
+    verbose,
+    any_extension,
+):
+    """
+    Extract WFS (Web Feature Service) to GeoParquet.
+
+    SERVICE_URL is the WFS service endpoint URL.
+
+    TYPENAME is the layer to extract (e.g., 'roads', 'buildings').
+    If omitted, lists available layers.
+
+    OUTPUT_FILE is the output GeoParquet file path. Required when TYPENAME is specified.
+
+    \b
+    Examples:
+
+        \b
+        # List available layers
+        gpio extract wfs https://geo.example.com/wfs
+
+        \b
+        # Extract entire layer
+        gpio extract wfs https://geo.example.com/wfs cities output.parquet
+
+        \b
+        # With bbox filter (server-side when supported)
+        gpio extract wfs https://geo.example.com/wfs roads output.parquet \\
+            --bbox -122.5,37.5,-122.0,38.0
+
+        \b
+        # Force specific CRS and use parallel extraction
+        gpio extract wfs https://geo.example.com/wfs buildings output.parquet \\
+            --output-crs EPSG:4326 --max-workers 3
+
+        \b
+        # Limit features and skip optimizations for faster extraction
+        gpio extract wfs https://geo.example.com/wfs parcels output.parquet \\
+            --limit 10000 --skip-hilbert --skip-bbox
+    """
+    from geoparquet_io.core.wfs import (
+        WFSError,
+        convert_wfs_to_geoparquet,
+        list_available_layers,
+    )
+
+    # If no typename, list available layers
+    if typename is None:
+        try:
+            layers = list_available_layers(service_url, version=wfs_version)
+        except WFSError as e:
+            raise click.ClickException(str(e)) from None
+
+        if not layers:
+            click.echo("No layers found in WFS service.")
+            return
+
+        click.echo(f"Available layers in WFS service ({len(layers)} found):\n")
+        for layer in layers:
+            name = layer.get("name", "unknown")
+            title = layer.get("title", "")
+            abstract = layer.get("abstract", "")
+
+            click.echo(f"  {name}")
+            if title and title != name:
+                click.echo(f"    Title: {title}")
+            if abstract:
+                # Truncate long abstracts
+                if len(abstract) > 100:
+                    abstract = abstract[:97] + "..."
+                click.echo(f"    Description: {abstract}")
+            click.echo()
+        return
+
+    # Typename provided but no output file
+    if output_file is None:
+        raise click.ClickException(
+            "OUTPUT_FILE is required when TYPENAME is specified.\n"
+            f"Usage: gpio extract wfs {service_url} {typename} OUTPUT_FILE"
+        )
+
+    # Validate .parquet extension
+    validate_parquet_extension(output_file, any_extension)
+
+    # Parse row group options
+    row_group_mb = parse_row_group_options(row_group_size, row_group_size_mb)
+
+    # Parse bbox if provided
+    bbox_tuple = None
+    if bbox:
+        try:
+            parts = [float(x.strip()) for x in bbox.split(",")]
+            if len(parts) != 4:
+                raise ValueError("Expected 4 values")
+            bbox_tuple = tuple(parts)
+        except ValueError as e:
+            raise click.ClickException(
+                f"Invalid bbox format: {bbox}\n"
+                "Expected: xmin,ymin,xmax,ymax (e.g., -122.5,37.5,-122.0,38.0)"
+            ) from e
+
+    try:
+        convert_wfs_to_geoparquet(
+            service_url=service_url,
+            typename=typename,
+            output_file=output_file,
+            version=wfs_version,
+            bbox=bbox_tuple,
+            bbox_mode=bbox_mode,
+            output_crs=output_crs,
+            limit=limit,
+            page_size=batch_size,
+            max_workers=max_workers,
+            skip_hilbert=skip_hilbert,
+            skip_bbox=skip_bbox,
+            compression=compression.upper(),
+            compression_level=compression_level,
+            row_group_size_mb=row_group_mb,
+            row_group_rows=row_group_size,
+            geoparquet_version=geoparquet_version,
+            overwrite=overwrite,
+            verbose=verbose,
+        )
+    except WFSError as e:
+        raise click.ClickException(str(e)) from None
+
+
 # Meta command - delegates to core.inspect.display_metadata
 def _handle_meta_display(
     parquet_file: str,

@@ -82,7 +82,7 @@ geoparquet_io/
 | `gpio benchmark` | compare, report, suite | Benchmark GeoParquet performance |
 | `gpio check` | all, bbox, compression, row-group, spatial, spec, stac | Check GeoParquet files for best practices |
 | `gpio convert` | csv, flatgeobuf, geojson, geopackage, geoparquet, reproject, shapefile | Convert between formats and coordinate systems |
-| `gpio extract` | arcgis, bigquery, geoparquet | Extract data from files and services to GeoParquet |
+| `gpio extract` | arcgis, bigquery, geoparquet, wfs | Extract data from files and services to GeoParquet |
 | `gpio inspect` | head, meta, stats, summary, tail | Inspect GeoParquet files and show metadata, previews, or statistics |
 | `gpio partition` | a5, admin, h3, kdtree, quadkey, s2, string | Commands for partitioning GeoParquet files |
 | `gpio publish` | stac, upload | Commands for publishing GeoParquet data (STAC metadata, cloud uploads) |
@@ -145,7 +145,7 @@ from geoparquet_io.core.common import is_remote_url, remote_write_context, setup
 
 ---
 
-<!-- freshness: last-verified: 2026-03-20, maps-to: pyproject.toml -->
+<!-- freshness: last-verified: 2026-03-23, maps-to: pyproject.toml -->
 ## Testing with uv
 
 ```bash
