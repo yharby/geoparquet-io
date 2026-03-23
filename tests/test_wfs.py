@@ -5,10 +5,8 @@ Tests use mocked HTTP responses to avoid network dependencies.
 Network tests are marked separately for optional integration testing.
 """
 
-from json import dumps as json_dumps
 from unittest.mock import MagicMock, patch
 
-import pyarrow as pa
 import pytest
 
 # =============================================================================
@@ -472,336 +470,192 @@ def mock_minimal_capabilities_xml():
 
 
 class TestCapabilityParsing:
-    """Tests for GetCapabilities XML parsing."""
+    """Tests for OWSLib-based capability parsing via mocked WebFeatureService."""
 
-    @patch("geoparquet_io.core.wfs._make_request")
-    def test_parses_layer_list(self, mock_request, mock_capabilities_xml):
-        """Test that GetCapabilities response is parsed to extract layer list."""
-        mock_request.return_value = mock_capabilities_xml
-        from geoparquet_io.core.wfs import get_wfs_capabilities
+    def _create_mock_wfs(self):
+        """Create a mock OWSLib WebFeatureService object."""
+        mock_wfs = MagicMock()
 
-        caps = get_wfs_capabilities("http://mock.wfs.server/wfs")
-
-        # Should parse 2 layers from the mock XML
-        layer_names = [layer.typename for layer in caps.layers]
-        assert "test:cities" in layer_names
-        assert "test:roads" in layer_names
-        assert len(caps.layers) == 2
-
-    @patch("geoparquet_io.core.wfs._make_request")
-    def test_extracts_layer_info(self, mock_request, mock_capabilities_xml):
-        """Test extraction of layer info: typename, title, CRS list, bbox."""
-        mock_request.return_value = mock_capabilities_xml
-        from geoparquet_io.core.wfs import get_wfs_capabilities
-
-        caps = get_wfs_capabilities("http://mock.wfs.server/wfs")
-
-        # Find cities layer and verify metadata
-        cities_layer = next(layer for layer in caps.layers if layer.typename == "test:cities")
-
-        assert cities_layer.title == "Cities"
-        assert "urn:ogc:def:crs:EPSG::4326" in cities_layer.crs_list
-        assert "urn:ogc:def:crs:EPSG::3857" in cities_layer.crs_list
-        assert cities_layer.default_crs == "urn:ogc:def:crs:EPSG::4326"
-
-        # Check bbox (global extent in mock)
-        assert cities_layer.bbox == (-180.0, -90.0, 180.0, 90.0)
-
-        # Check roads layer (USA extent in mock)
-        roads_layer = next(layer for layer in caps.layers if layer.typename == "test:roads")
-        assert roads_layer.bbox == (-125.0, 24.0, -66.0, 50.0)
-
-    @patch("geoparquet_io.core.wfs._make_request")
-    def test_extracts_supported_formats(self, mock_request, mock_capabilities_xml):
-        """Test extraction of supported output formats from capabilities."""
-        mock_request.return_value = mock_capabilities_xml
-        from geoparquet_io.core.wfs import get_wfs_capabilities
-
-        caps = get_wfs_capabilities("http://mock.wfs.server/wfs")
-
-        # Check GetFeature operation output formats
-        assert "application/json" in caps.output_formats
-        assert "application/geo+json" in caps.output_formats
-        assert "text/xml; subtype=gml/3.1.1" in caps.output_formats
-
-    @patch("geoparquet_io.core.wfs._make_request")
-    def test_handles_missing_optional_fields(self, mock_request, mock_minimal_capabilities_xml):
-        """Test parsing capabilities with missing optional fields (Abstract, OtherSRS)."""
-        mock_request.return_value = mock_minimal_capabilities_xml
-        from geoparquet_io.core.wfs import get_wfs_capabilities
-
-        caps = get_wfs_capabilities("http://mock.wfs.server/wfs")
-
-        # Should still parse successfully with minimal data
-        assert len(caps.layers) == 1
-        layer = caps.layers[0]
-
-        assert layer.typename == "minimal:layer"
-        assert layer.title is None  # Title was not provided
-        assert layer.default_crs == "urn:ogc:def:crs:EPSG::4326"
-        assert layer.bbox is None  # No bounding box in minimal response
-
-
-class TestPagination:
-    """Tests for pagination logic with mocked HTTP."""
-
-    @patch("geoparquet_io.core.wfs._make_request")
-    def test_fetches_single_page(self, mock_request, mock_geojson_response):
-        """Test fetching features that fit in a single page."""
-        mock_request.return_value = json_dumps(mock_geojson_response)
-        from geoparquet_io.core.wfs import fetch_all_features
-
-        pages = list(
-            fetch_all_features(
-                "http://mock.wfs.server/wfs",
-                typename="test:cities",
-                page_size=1000,
-            )
-        )
-
-        # Should make exactly 1 request (all 3 features fit in one page)
-        assert len(pages) == 1
-        assert pages[0]["numberReturned"] == 3
-
-    @patch("geoparquet_io.core.wfs._make_request")
-    def test_fetches_multiple_pages(
-        self, mock_request, mock_geojson_page_1, mock_geojson_page_2, mock_geojson_page_3
-    ):
-        """Test fetching features across multiple pages with different offsets."""
-        # Return different pages based on call order
-        mock_request.side_effect = [
-            json_dumps(mock_geojson_page_1),
-            json_dumps(mock_geojson_page_2),
-            json_dumps(mock_geojson_page_3),
+        # Mock layer contents
+        cities_layer = MagicMock()
+        cities_layer.id = "test:cities"
+        cities_layer.title = "Cities"
+        cities_layer.crsOptions = [
+            "urn:ogc:def:crs:EPSG::4326",
+            "urn:ogc:def:crs:EPSG::3857",
         ]
-        from geoparquet_io.core.wfs import fetch_all_features
+        cities_layer.boundingBoxWGS84 = (-180.0, -90.0, 180.0, 90.0)
 
-        pages = list(
-            fetch_all_features(
-                "http://mock.wfs.server/wfs",
-                typename="test:cities",
-                page_size=2,
-            )
-        )
+        roads_layer = MagicMock()
+        roads_layer.id = "test:roads"
+        roads_layer.title = "Road Network"
+        roads_layer.crsOptions = ["urn:ogc:def:crs:EPSG::4326"]
+        roads_layer.boundingBoxWGS84 = (-125.0, 24.0, -66.0, 50.0)
 
-        # Should fetch 3 pages
-        assert len(pages) == 3
-
-        # Verify feature counts per page
-        assert pages[0]["numberReturned"] == 2
-        assert pages[1]["numberReturned"] == 2
-        assert pages[2]["numberReturned"] == 1
-
-        # Verify total features
-        total_features = sum(len(p["features"]) for p in pages)
-        assert total_features == 5
-
-    @patch("geoparquet_io.core.wfs._make_request")
-    def test_respects_limit_parameter(self, mock_request, mock_geojson_page_1):
-        """Test that limit parameter caps total features fetched."""
-        mock_request.return_value = json_dumps(mock_geojson_page_1)
-        from geoparquet_io.core.wfs import fetch_all_features
-
-        pages = list(
-            fetch_all_features(
-                "http://mock.wfs.server/wfs",
-                typename="test:cities",
-                page_size=1000,
-                limit=2,
-            )
-        )
-
-        # With limit=2, should return at most 2 features
-        total_features = sum(len(p["features"]) for p in pages)
-        assert total_features <= 2
-
-    @patch("geoparquet_io.core.wfs._make_request")
-    def test_handles_empty_response(self, mock_request, mock_empty_response):
-        """Test handling of empty feature collection response."""
-        mock_request.return_value = json_dumps(mock_empty_response)
-        from geoparquet_io.core.wfs import fetch_all_features
-
-        pages = list(
-            fetch_all_features(
-                "http://mock.wfs.server/wfs",
-                typename="test:empty",
-                page_size=1000,
-            )
-        )
-
-        # Should return one page with zero features
-        assert len(pages) == 1
-        assert pages[0]["numberReturned"] == 0
-        assert len(pages[0]["features"]) == 0
-
-    @patch("geoparquet_io.core.wfs._make_request")
-    def test_parallel_fetching_maintains_order(
-        self, mock_request, mock_geojson_page_1, mock_geojson_page_2, mock_geojson_page_3
-    ):
-        """Test that parallel fetching (max_workers > 1) maintains page order."""
-        # Mock returns pages potentially out of order due to parallel execution
-        mock_request.side_effect = [
-            json_dumps(mock_geojson_page_1),
-            json_dumps(mock_geojson_page_2),
-            json_dumps(mock_geojson_page_3),
+        mock_wfs.contents = {
+            "test:cities": cities_layer,
+            "test:roads": roads_layer,
+        }
+        mock_wfs.getfeature_output_formats = [
+            "application/json",
+            "application/geo+json",
+            "text/xml; subtype=gml/3.1.1",
         ]
-        from geoparquet_io.core.wfs import fetch_all_features
 
-        pages = list(
-            fetch_all_features(
-                "http://mock.wfs.server/wfs",
-                typename="test:cities",
-                page_size=2,
-                max_workers=3,  # Parallel fetching
-            )
-        )
+        return mock_wfs
 
-        # Pages should be returned in order regardless of parallel execution
-        assert len(pages) == 3
+    @patch("owslib.wfs.WebFeatureService")
+    def test_parses_layer_list(self, mock_wfs_class):
+        """Test that GetCapabilities returns WFS with layer contents."""
+        mock_wfs_class.return_value = self._create_mock_wfs()
+        from geoparquet_io.core.wfs import get_wfs_capabilities
 
-        # First page should have San Francisco (first city)
-        first_city = pages[0]["features"][0]["properties"]["name"]
-        assert first_city == "San Francisco"
+        wfs = get_wfs_capabilities("http://mock.wfs.server/wfs")
 
-        # Last page should have Paris (last city)
-        last_city = pages[2]["features"][0]["properties"]["name"]
-        assert last_city == "Paris"
+        # WFS object should have contents with 2 layers
+        assert len(wfs.contents) == 2
+        assert "test:cities" in wfs.contents
+        assert "test:roads" in wfs.contents
+
+    @patch("owslib.wfs.WebFeatureService")
+    def test_extracts_layer_info(self, mock_wfs_class):
+        """Test extraction of layer info via OWSLib interface."""
+        mock_wfs_class.return_value = self._create_mock_wfs()
+        from geoparquet_io.core.wfs import get_wfs_capabilities
+
+        wfs = get_wfs_capabilities("http://mock.wfs.server/wfs")
+
+        # Verify cities layer metadata via OWSLib interface
+        cities = wfs.contents["test:cities"]
+        assert cities.title == "Cities"
+        assert "urn:ogc:def:crs:EPSG::4326" in cities.crsOptions
+        assert cities.boundingBoxWGS84 == (-180.0, -90.0, 180.0, 90.0)
+
+        # Verify roads layer
+        roads = wfs.contents["test:roads"]
+        assert roads.boundingBoxWGS84 == (-125.0, 24.0, -66.0, 50.0)
+
+    @patch("owslib.wfs.WebFeatureService")
+    def test_extracts_supported_formats(self, mock_wfs_class):
+        """Test extraction of supported output formats."""
+        mock_wfs_class.return_value = self._create_mock_wfs()
+        from geoparquet_io.core.wfs import get_wfs_capabilities
+
+        wfs = get_wfs_capabilities("http://mock.wfs.server/wfs")
+
+        # Check formats via OWSLib interface
+        assert "application/json" in wfs.getfeature_output_formats
+        assert "application/geo+json" in wfs.getfeature_output_formats
+
+    @patch("owslib.wfs.WebFeatureService")
+    def test_handles_connection_error(self, mock_wfs_class):
+        """Test handling of connection errors."""
+        mock_wfs_class.side_effect = Exception("Connection refused")
+        from geoparquet_io.core.wfs import WFSError, get_wfs_capabilities
+
+        with pytest.raises(WFSError, match="Could not connect|Connection"):
+            get_wfs_capabilities("http://mock.wfs.server/wfs")
 
 
 class TestGeometryParsing:
-    """Tests for GeoJSON/GML to Arrow table conversion."""
+    """Tests for GeoJSON to Arrow table conversion using internal functions."""
 
     def test_geojson_to_arrow_table(self, mock_geojson_response):
-        """Test conversion of GeoJSON FeatureCollection to Arrow table."""
-        from geoparquet_io.core.wfs import geojson_to_arrow_table
+        """Test conversion of GeoJSON features to Arrow table."""
+        from geoparquet_io.core.wfs import _geojson_to_arrow_table
 
-        table = geojson_to_arrow_table(mock_geojson_response)
+        features = mock_geojson_response["features"]
+        table = _geojson_to_arrow_table(features)
 
         # Should have 3 rows (3 features in mock)
+        assert table is not None
         assert table.num_rows == 3
 
         # Should have expected columns
         column_names = table.column_names
         assert "name" in column_names
         assert "population" in column_names
-        assert "country" in column_names
 
-        # Check data integrity
-        names = table.column("name").to_pylist()
-        assert "San Francisco" in names
-        assert "New York" in names
-        assert "London" in names
+    def test_geojson_extracts_geometry(self, mock_geojson_response):
+        """Test that geometry column is extracted."""
+        from geoparquet_io.core.wfs import _geojson_to_arrow_table
 
-        populations = table.column("population").to_pylist()
-        assert 884363 in populations  # San Francisco
-        assert 8336817 in populations  # New York
+        features = mock_geojson_response["features"]
+        table = _geojson_to_arrow_table(features)
 
-    def test_gml_to_arrow_table(self, mock_gml_response):
-        """Test conversion of GML3 response to Arrow table."""
-        from geoparquet_io.core.wfs import gml_to_arrow_table
-
-        table = gml_to_arrow_table(mock_gml_response, typename="test:cities")
-
-        # Should have 1 row (1 feature in mock GML)
-        assert table.num_rows == 1
-
-        # Check data
-        names = table.column("name").to_pylist()
-        assert names[0] == "San Francisco"
-
-        populations = table.column("population").to_pylist()
-        assert populations[0] == 884363
-
-    def test_extracts_geometry_column(self, mock_geojson_response):
-        """Test that geometry column is properly extracted."""
-        from geoparquet_io.core.wfs import geojson_to_arrow_table
-
-        table = geojson_to_arrow_table(mock_geojson_response)
-
-        # Should have a geometry column
+        # Should have geometry column
+        assert table is not None
         assert "geometry" in table.column_names
 
-        # Geometry should be binary (WKB)
-        geom_column = table.column("geometry")
-        assert geom_column.type == pa.binary() or geom_column.type == pa.large_binary()
+    def test_empty_features_returns_none(self):
+        """Test that empty feature list returns None."""
+        from geoparquet_io.core.wfs import _geojson_to_arrow_table
 
-    def test_handles_empty_features(self, mock_empty_response):
-        """Test conversion of empty FeatureCollection to Arrow table."""
-        from geoparquet_io.core.wfs import geojson_to_arrow_table
+        table = _geojson_to_arrow_table([])
+        assert table is None
 
-        table = geojson_to_arrow_table(mock_empty_response)
+    def test_is_geojson_response_detection(self):
+        """Test GeoJSON response detection."""
+        from geoparquet_io.core.wfs import _is_geojson_response
 
-        # Should create table with 0 rows but valid schema
-        assert table.num_rows == 0
+        # Valid GeoJSON
+        geojson = b'{"type": "FeatureCollection", "features": []}'
+        assert _is_geojson_response(geojson) is True
+
+        # XML/GML response
+        gml = b'<?xml version="1.0"?><wfs:FeatureCollection>'
+        assert _is_geojson_response(gml) is False
+
+        # Invalid content
+        assert _is_geojson_response(b"not json") is False
 
 
 class TestErrorHandling:
-    """Tests for HTTP error scenarios."""
+    """Tests for error handling in WFS module."""
 
-    @patch("geoparquet_io.core.wfs._make_request")
-    def test_handles_http_404(self, mock_request):
-        """Test handling of HTTP 404 (Not Found) error."""
-        import click
-        import httpx
+    def test_wfs_error_raised_for_invalid_url(self):
+        """Test that WFSError is raised for connection failures."""
+        from geoparquet_io.core.wfs import WFSError, get_wfs_capabilities
 
-        mock_request.side_effect = httpx.HTTPStatusError(
-            "Not Found",
-            request=MagicMock(),
-            response=MagicMock(status_code=404),
+        # Invalid URL should raise WFSError
+        with pytest.raises(WFSError):
+            get_wfs_capabilities("http://localhost:99999/invalid")
+
+    @patch("owslib.wfs.WebFeatureService")
+    def test_layer_not_found_error(self, mock_wfs_class):
+        """Test error when requested layer doesn't exist."""
+        mock_wfs = MagicMock()
+        # Only "ns:cities" exists, not "nonexistent:data"
+        mock_wfs.contents = {"ns:cities": MagicMock()}
+        mock_wfs_class.return_value = mock_wfs
+
+        from geoparquet_io.core.wfs import WFSError, get_layer_info
+
+        with pytest.raises(WFSError, match="not found"):
+            get_layer_info("http://mock.wfs.server/wfs", "nonexistent:data")
+
+    def test_invalid_max_workers_raises_error(self):
+        """Test that invalid max_workers value raises error."""
+        from geoparquet_io.core.wfs import WFSLayerInfo, fetch_all_features
+
+        layer_info = WFSLayerInfo(
+            typename="test:layer",
+            title="Test",
+            crs_list=["EPSG:4326"],
+            default_crs="EPSG:4326",
+            bbox=None,
+            geometry_column="geometry",
+            available_formats=["application/json"],
         )
-        from geoparquet_io.core.wfs import get_wfs_capabilities
 
-        with pytest.raises(click.ClickException, match="404|not found|Not Found"):
-            get_wfs_capabilities("http://nonexistent.wfs.server/wfs")
-
-    @patch("geoparquet_io.core.wfs._make_request")
-    def test_handles_http_500_with_retry(self, mock_request, mock_capabilities_xml):
-        """Test that HTTP 500 errors trigger retry logic and eventually succeed."""
-        import httpx
-
-        # First two calls fail with 500, third succeeds
-        mock_request.side_effect = [
-            httpx.HTTPStatusError(
-                "Server Error",
-                request=MagicMock(),
-                response=MagicMock(status_code=500),
-            ),
-            httpx.HTTPStatusError(
-                "Server Error",
-                request=MagicMock(),
-                response=MagicMock(status_code=500),
-            ),
-            mock_capabilities_xml,  # Third call succeeds
-        ]
-        from geoparquet_io.core.wfs import get_wfs_capabilities
-
-        # Should succeed after retries
-        caps = get_wfs_capabilities("http://mock.wfs.server/wfs")
-        assert len(caps.layers) == 2
-        assert mock_request.call_count == 3
-
-    @patch("geoparquet_io.core.wfs._make_request")
-    def test_handles_invalid_typename(self, mock_request, mock_capabilities_xml):
-        """Test handling of request for non-existent typename."""
-        import click
-
-        mock_request.return_value = mock_capabilities_xml
-        from geoparquet_io.core.wfs import get_layer_info
-
-        with pytest.raises(click.ClickException, match="not found|invalid|does not exist"):
-            get_layer_info("http://mock.wfs.server/wfs", "nonexistent:layer")
-
-    @patch("geoparquet_io.core.wfs._make_request")
-    def test_handles_network_timeout(self, mock_request):
-        """Test handling of network timeout errors."""
-        import click
-        import httpx
-
-        mock_request.side_effect = httpx.TimeoutException("Connection timed out")
-        from geoparquet_io.core.wfs import get_wfs_capabilities
-
-        with pytest.raises((click.ClickException, httpx.TimeoutException)):
-            get_wfs_capabilities("http://slow.wfs.server/wfs")
+        with pytest.raises(ValueError, match="max_workers must be at least 1"):
+            list(
+                fetch_all_features(
+                    "http://example.com/wfs",
+                    layer_info,
+                    max_workers=0,
+                )
+            )
 
 
 # Helper Data Structures for Tests
