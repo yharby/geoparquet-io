@@ -509,6 +509,54 @@ class Table:
 
         return cls(arrow_table)
 
+    @classmethod
+    def from_wfs(
+        cls,
+        service_url: str,
+        typename: str,
+        version: str = "1.1.0",
+        bbox: tuple[float, float, float, float] | None = None,
+        limit: int | None = None,
+        max_workers: int = 1,
+        page_size: int = 10000,
+    ) -> Table:
+        """
+        Create Table from WFS layer.
+
+        Uses DuckDB's native HTTP streaming for fast extraction. For very large
+        datasets (1M+ features), use max_workers > 1 to enable parallel pagination.
+
+        Args:
+            service_url: WFS service URL
+            typename: Feature type name (e.g., 'cities' or 'ns:cities')
+            version: WFS version (1.0.0 or 1.1.0)
+            bbox: Optional bounding box filter (xmin, ymin, xmax, ymax)
+            limit: Maximum features to fetch
+            max_workers: Parallel requests for large datasets (default: 1)
+            page_size: Features per page when using parallel mode (default: 10000)
+
+        Returns:
+            Table for chaining operations
+
+        Example:
+            >>> import geoparquet_io as gpio
+            >>> gpio.Table.from_wfs('https://geo.example.com/wfs', 'cities').add_bbox().write('cities.parquet')
+            >>> # For large datasets:
+            >>> gpio.Table.from_wfs('https://geo.example.com/wfs', 'parcels', max_workers=4)
+        """
+        from geoparquet_io.core.wfs import wfs_to_table
+
+        table = wfs_to_table(
+            service_url,
+            typename,
+            version=version,
+            bbox=bbox,
+            limit=limit,
+            max_workers=max_workers,
+            page_size=page_size,
+        )
+        return cls(table)
+
     def _format_crs_display(self, crs: dict | str | None) -> str:
         """Format CRS for human-readable display."""
         if crs is None:

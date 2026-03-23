@@ -72,7 +72,7 @@ geoparquet_io/
     └── stac.py          # STAC metadata API
 ```
 
-<!-- freshness: last-verified: 2026-03-20, maps-to: geoparquet_io/cli/main.py -->
+<!-- freshness: last-verified: 2026-03-23, maps-to: geoparquet_io/cli/main.py -->
 <!-- BEGIN GENERATED: cli-commands -->
 ### CLI Command Groups
 
@@ -82,7 +82,7 @@ geoparquet_io/
 | `gpio benchmark` | compare, report, suite | Benchmark GeoParquet performance |
 | `gpio check` | all, bbox, compression, row-group, spatial, spec, stac | Check GeoParquet files for best practices |
 | `gpio convert` | csv, flatgeobuf, geojson, geopackage, geoparquet, reproject, shapefile | Convert between formats and coordinate systems |
-| `gpio extract` | arcgis, bigquery, geoparquet | Extract data from files and services to GeoParquet |
+| `gpio extract` | arcgis, bigquery, geoparquet, wfs | Extract data from files and services to GeoParquet |
 | `gpio inspect` | head, meta, stats, summary, tail | Inspect GeoParquet files and show metadata, previews, or statistics |
 | `gpio partition` | a5, admin, h3, kdtree, quadkey, s2, string | Commands for partitioning GeoParquet files |
 | `gpio publish` | stac, upload | Commands for publishing GeoParquet data (STAC metadata, cloud uploads) |
@@ -101,6 +101,7 @@ geoparquet_io/
 | `duckdb_metadata.py` | DuckDB-based Parquet metadata extraction. | 1277 |
 | `arcgis.py` | ArcGIS Feature Service to GeoParquet conversion. | 1226 |
 | `extract.py` | Extract columns and rows from GeoParquet files. | 1225 |
+| `wfs.py` | WFS (Web Feature Service) to GeoParquet conversion... | 1193 |
 | `metadata_utils.py` | Utilities for extracting and formatting GeoParquet... | 1077 |
 | `extract_bigquery.py` |  | 934 |
 | `partition_common.py` |  | 908 |
@@ -108,8 +109,7 @@ geoparquet_io/
 | `benchmark.py` | Benchmark utilities for comparing GeoParquet conve... | 701 |
 | `partition_admin_hierarchical.py` |  | 698 |
 | `upload.py` | Upload GeoParquet files to cloud object storage. | 675 |
-| `geojson_stream.py` | GeoJSON conversion for GeoParquet files. | 667 |
-| ... | *36 more modules* | |
+| ... | *37 more modules* | |
 <!-- END GENERATED: core-modules -->
 
 <!-- freshness: last-verified: 2026-03-20, maps-to: geoparquet_io/core/common.py, geoparquet_io/cli/decorators.py -->
@@ -145,7 +145,7 @@ from geoparquet_io.core.common import is_remote_url, remote_write_context, setup
 
 ---
 
-<!-- freshness: last-verified: 2026-03-20, maps-to: pyproject.toml -->
+<!-- freshness: last-verified: 2026-03-23, maps-to: pyproject.toml -->
 ## Testing with uv
 
 ```bash

@@ -941,6 +941,138 @@ To find service URLs:
 !!! note "Layer ID Required"
     The URL must include the layer ID (e.g., `/FeatureServer/0`). Services often have multiple layers—use the REST directory to find the correct one.
 
+## Extracting from WFS Services
+
+Web Feature Service (WFS) is an OGC standard for serving vector geospatial data over HTTP. Many government agencies and organizations publish data via WFS. gpio uses DuckDB's httpfs extension to stream JSON directly over HTTP, making extraction very fast.
+
+### Basic Usage
+
+=== "CLI"
+    ```bash
+    # List available layers
+    gpio extract wfs https://geo.example.com/wfs
+
+    # Extract a layer to GeoParquet
+    gpio extract wfs https://geo.example.com/wfs cities output.parquet
+
+    # Extract with limit
+    gpio extract wfs https://geo.example.com/wfs cities output.parquet --limit 1000
+
+    # Verbose mode shows progress
+    gpio extract wfs https://geo.example.com/wfs cities output.parquet --verbose
+    ```
+
+=== "Python"
+    ```python
+    from geoparquet_io.api import Table
+
+    # Extract and chain operations
+    Table.from_wfs('https://geo.example.com/wfs', 'cities', limit=1000) \
+        .add_bbox() \
+        .sort_hilbert() \
+        .write('cities.parquet')
+    ```
+
+### Bbox Filtering
+
+Spatial filtering can be applied server-side (pushed to WFS) or locally (after download):
+
+=== "CLI"
+    ```bash
+    # Server-side bbox filter (default for WFS)
+    gpio extract wfs https://geo.example.com/wfs cities output.parquet \
+        --bbox -122.5,37.5,-122.0,38.0
+
+    # Explicitly choose server-side
+    gpio extract wfs https://geo.example.com/wfs cities output.parquet \
+        --bbox -122.5,37.5,-122.0,38.0 --bbox-mode server
+
+    # Force local filtering (download all, then filter)
+    gpio extract wfs https://geo.example.com/wfs cities output.parquet \
+        --bbox -122.5,37.5,-122.0,38.0 --bbox-mode local
+    ```
+
+=== "Python"
+    ```python
+    from geoparquet_io.api import Table
+
+    table = Table.from_wfs(
+        'https://geo.example.com/wfs',
+        'cities',
+        bbox=(-122.5, 37.5, -122.0, 38.0)
+    )
+    ```
+
+### Parallel Fetching for Large Datasets
+
+For datasets with 1 million+ features, use parallel pagination to avoid server timeouts:
+
+=== "CLI"
+    ```bash
+    # Parallel extraction with 4 workers
+    gpio extract wfs https://geo.example.com/wfs large_layer output.parquet \
+        --workers 4 \
+        --page-size 10000
+
+    # For most datasets under 100K features, single-stream is faster
+    gpio extract wfs https://geo.example.com/wfs cities output.parquet
+    ```
+
+=== "Python"
+    ```python
+    from geoparquet_io.api import Table
+
+    # Parallel extraction
+    table = Table.from_wfs(
+        'https://geo.example.com/wfs',
+        'large_layer',
+        max_workers=4,
+        page_size=10000
+    )
+    ```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--workers` | 1 | Number of parallel requests (1-10) |
+| `--page-size` | 10000 | Features per page when using `--workers > 1` |
+
+!!! tip "When to use parallel"
+    - **Single stream (default)**: Fastest for datasets under ~100K features
+    - **Parallel (`--workers 2-4`)**: For 1M+ feature datasets where timeouts occur
+
+### Output Optimization
+
+By default, WFS extracts include Hilbert spatial ordering and bbox columns:
+
+```bash
+# Skip optimizations for faster extraction
+gpio extract wfs https://geo.example.com/wfs cities output.parquet \
+    --skip-hilbert \
+    --skip-bbox
+
+# Custom compression
+gpio extract wfs https://geo.example.com/wfs cities output.parquet \
+    --compression GZIP \
+    --compression-level 6
+```
+
+### CRS Handling
+
+gpio automatically negotiates the coordinate reference system with the WFS server:
+
+```bash
+# Request specific CRS from server
+gpio extract wfs https://geo.example.com/wfs cities output.parquet \
+    --output-crs EPSG:3857
+```
+
+### Common Public WFS Services
+
+- **Transport for Cairo**: `https://data.transportforcairo.com/geoserver/geonode/ows`
+- **GeoServer Demo**: `https://demo.geoserver.org/geoserver/wfs`
+- State GIS portals (varies by state)
+- Municipal open data portals
+
 ## Working with Partitioned Input Data
 
 The `extract` command can read from partitioned GeoParquet datasets, including directories containing multiple parquet files and hive-style partitions.

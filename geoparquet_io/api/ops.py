@@ -732,3 +732,49 @@ def from_arcgis(
         max_workers=max_workers,
         verbose=False,
     )
+
+
+def from_wfs(
+    service_url: str,
+    typename: str,
+    version: str = "1.1.0",
+    bbox: tuple[float, float, float, float] | None = None,
+    limit: int | None = None,
+    max_workers: int = 1,
+    page_size: int = 10000,
+) -> pa.Table:
+    """
+    Fetch WFS layer as PyArrow Table.
+
+    Uses DuckDB's native HTTP streaming for fast extraction. For very large
+    datasets (1M+ features), use max_workers > 1 to enable parallel pagination.
+
+    Args:
+        service_url: WFS service URL
+        typename: Feature type name (e.g., 'cities' or 'ns:cities')
+        version: WFS version (1.0.0 or 1.1.0)
+        bbox: Optional bounding box filter (xmin, ymin, xmax, ymax)
+        limit: Maximum features to fetch
+        max_workers: Parallel requests for large datasets (default: 1)
+        page_size: Features per page when using parallel mode (default: 10000)
+
+    Returns:
+        PyArrow Table with geometry column
+
+    Example:
+        >>> from geoparquet_io.api import ops
+        >>> table = ops.from_wfs('https://geo.example.com/wfs', 'cities', limit=100)
+        >>> # For large datasets:
+        >>> table = ops.from_wfs('https://geo.example.com/wfs', 'parcels', max_workers=4)
+    """
+    from geoparquet_io.core.wfs import wfs_to_table
+
+    return wfs_to_table(
+        service_url,
+        typename,
+        version=version,
+        bbox=bbox,
+        limit=limit,
+        max_workers=max_workers,
+        page_size=page_size,
+    )

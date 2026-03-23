@@ -116,6 +116,51 @@ gpio extract arcgis https://... output.parquet --username user --password pass
 !!! note "Server-Side Filtering"
     The `--where`, `--bbox`, `--include-cols`, and `--limit` options are pushed to the ArcGIS server for efficient filtering. Only matching data is downloaded.
 
+### extract wfs
+
+Extract from WFS (Web Feature Service) to GeoParquet.
+
+```bash
+gpio extract wfs https://geo.example.com/wfs layer_name output.parquet
+```
+
+**Options:**
+
+- `--version` - WFS protocol version: `1.0.0` or `1.1.0` (default)
+- `--bbox` - Bounding box filter: `xmin,ymin,xmax,ymax` in WGS84
+- `--bbox-mode` - Filter mode: `auto` (default), `server`, or `local`
+- `--limit` - Maximum features to extract
+- `--output-crs` - Request specific CRS from server (e.g., `EPSG:4326`)
+- `--workers` - Parallel requests for large datasets (1-10, default: 1)
+- `--page-size` - Features per page when using `--workers > 1` (default: 10000)
+- `--skip-hilbert` - Skip Hilbert spatial ordering
+- `--skip-bbox` - Skip adding bbox column
+
+**Examples:**
+
+```bash
+# List available layers
+gpio extract wfs https://geo.example.com/wfs
+
+# Extract entire layer
+gpio extract wfs https://geo.example.com/wfs cities output.parquet
+
+# With bbox filter
+gpio extract wfs https://geo.example.com/wfs cities output.parquet \
+    --bbox -122.5,37.5,-122.0,38.0
+
+# With CRS and limit
+gpio extract wfs https://geo.example.com/wfs cities output.parquet \
+    --output-crs EPSG:4326 --limit 10000
+
+# Parallel extraction for large datasets (1M+ features)
+gpio extract wfs https://geo.example.com/wfs large_layer output.parquet \
+    --workers 4 --page-size 10000
+```
+
+!!! tip "Performance"
+    For datasets under ~100K features, the default single-stream mode is fastest. Use `--workers 2-4` for very large datasets (1M+ features) where server timeouts occur.
+
 ## Options
 
 ### Column Selection

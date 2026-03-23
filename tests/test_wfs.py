@@ -1,0 +1,1127 @@
+"""
+Tests for WFS (Web Feature Service) extraction.
+
+Tests use mocked HTTP responses to avoid network dependencies.
+Network tests are marked separately for optional integration testing.
+"""
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+# Module-level imports for WFS functions (avoids per-test imports)
+from geoparquet_io.core.wfs import (
+    WFSError,
+    WFSLayerInfo,
+    _build_bbox_param,
+    _build_local_bbox_filter,
+    _detect_best_output_format,
+    _determine_bbox_strategy,
+    _negotiate_crs,
+    _normalize_crs,
+    _validate_identifier,
+    get_layer_info,
+    get_wfs_capabilities,
+    list_available_layers,
+)
+
+# =============================================================================
+# Mock WFS Response Data
+# =============================================================================
+
+# WFS 1.1.0 GetCapabilities response with 2 feature types (cities, roads)
+MOCK_CAPABILITIES_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<wfs:WFS_Capabilities
+    xmlns:wfs="http://www.opengis.net/wfs"
+    xmlns:ows="http://www.opengis.net/ows"
+    xmlns:ogc="http://www.opengis.net/ogc"
+    xmlns:xlink="http://www.w3.org/1999/xlink"
+    xmlns:gml="http://www.opengis.net/gml"
+    version="1.1.0">
+
+    <ows:ServiceIdentification>
+        <ows:Title>Mock WFS Server</ows:Title>
+        <ows:Abstract>A mock WFS server for testing geoparquet-io</ows:Abstract>
+        <ows:ServiceType>WFS</ows:ServiceType>
+        <ows:ServiceTypeVersion>1.1.0</ows:ServiceTypeVersion>
+    </ows:ServiceIdentification>
+
+    <ows:ServiceProvider>
+        <ows:ProviderName>Test Provider</ows:ProviderName>
+    </ows:ServiceProvider>
+
+    <ows:OperationsMetadata>
+        <ows:Operation name="GetCapabilities">
+            <ows:DCP>
+                <ows:HTTP>
+                    <ows:Get xlink:href="http://mock.wfs.server/wfs"/>
+                </ows:HTTP>
+            </ows:DCP>
+        </ows:Operation>
+        <ows:Operation name="DescribeFeatureType">
+            <ows:DCP>
+                <ows:HTTP>
+                    <ows:Get xlink:href="http://mock.wfs.server/wfs"/>
+                    <ows:Post xlink:href="http://mock.wfs.server/wfs"/>
+                </ows:HTTP>
+            </ows:DCP>
+        </ows:Operation>
+        <ows:Operation name="GetFeature">
+            <ows:DCP>
+                <ows:HTTP>
+                    <ows:Get xlink:href="http://mock.wfs.server/wfs"/>
+                    <ows:Post xlink:href="http://mock.wfs.server/wfs"/>
+                </ows:HTTP>
+            </ows:DCP>
+            <ows:Parameter name="outputFormat">
+                <ows:Value>text/xml; subtype=gml/3.1.1</ows:Value>
+                <ows:Value>application/json</ows:Value>
+                <ows:Value>application/geo+json</ows:Value>
+            </ows:Parameter>
+        </ows:Operation>
+    </ows:OperationsMetadata>
+
+    <wfs:FeatureTypeList>
+        <wfs:FeatureType>
+            <wfs:Name>test:cities</wfs:Name>
+            <wfs:Title>Cities</wfs:Title>
+            <wfs:Abstract>Major cities dataset for testing</wfs:Abstract>
+            <wfs:DefaultSRS>urn:ogc:def:crs:EPSG::4326</wfs:DefaultSRS>
+            <wfs:OtherSRS>urn:ogc:def:crs:EPSG::3857</wfs:OtherSRS>
+            <wfs:OutputFormats>
+                <wfs:Format>text/xml; subtype=gml/3.1.1</wfs:Format>
+                <wfs:Format>application/json</wfs:Format>
+            </wfs:OutputFormats>
+            <ows:WGS84BoundingBox>
+                <ows:LowerCorner>-180.0 -90.0</ows:LowerCorner>
+                <ows:UpperCorner>180.0 90.0</ows:UpperCorner>
+            </ows:WGS84BoundingBox>
+        </wfs:FeatureType>
+        <wfs:FeatureType>
+            <wfs:Name>test:roads</wfs:Name>
+            <wfs:Title>Roads</wfs:Title>
+            <wfs:Abstract>Road network dataset for testing</wfs:Abstract>
+            <wfs:DefaultSRS>urn:ogc:def:crs:EPSG::4326</wfs:DefaultSRS>
+            <wfs:OutputFormats>
+                <wfs:Format>text/xml; subtype=gml/3.1.1</wfs:Format>
+                <wfs:Format>application/json</wfs:Format>
+            </wfs:OutputFormats>
+            <ows:WGS84BoundingBox>
+                <ows:LowerCorner>-125.0 24.0</ows:LowerCorner>
+                <ows:UpperCorner>-66.0 50.0</ows:UpperCorner>
+            </ows:WGS84BoundingBox>
+        </wfs:FeatureType>
+    </wfs:FeatureTypeList>
+
+    <ogc:Filter_Capabilities>
+        <ogc:Spatial_Capabilities>
+            <ogc:GeometryOperands>
+                <ogc:GeometryOperand>gml:Envelope</ogc:GeometryOperand>
+                <ogc:GeometryOperand>gml:Point</ogc:GeometryOperand>
+                <ogc:GeometryOperand>gml:Polygon</ogc:GeometryOperand>
+            </ogc:GeometryOperands>
+            <ogc:SpatialOperators>
+                <ogc:SpatialOperator name="BBOX"/>
+                <ogc:SpatialOperator name="Intersects"/>
+                <ogc:SpatialOperator name="Within"/>
+            </ogc:SpatialOperators>
+        </ogc:Spatial_Capabilities>
+        <ogc:Scalar_Capabilities>
+            <ogc:LogicalOperators/>
+            <ogc:ComparisonOperators>
+                <ogc:ComparisonOperator>EqualTo</ogc:ComparisonOperator>
+                <ogc:ComparisonOperator>NotEqualTo</ogc:ComparisonOperator>
+                <ogc:ComparisonOperator>LessThan</ogc:ComparisonOperator>
+                <ogc:ComparisonOperator>GreaterThan</ogc:ComparisonOperator>
+                <ogc:ComparisonOperator>Like</ogc:ComparisonOperator>
+            </ogc:ComparisonOperators>
+        </ogc:Scalar_Capabilities>
+    </ogc:Filter_Capabilities>
+</wfs:WFS_Capabilities>
+"""
+
+# GeoJSON FeatureCollection with 3 point features
+MOCK_GEOJSON_RESPONSE = {
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "id": "cities.1",
+            "geometry": {"type": "Point", "coordinates": [-122.4194, 37.7749]},
+            "properties": {
+                "gml_id": "cities.1",
+                "name": "San Francisco",
+                "population": 884363,
+                "country": "USA",
+            },
+        },
+        {
+            "type": "Feature",
+            "id": "cities.2",
+            "geometry": {"type": "Point", "coordinates": [-73.9857, 40.7484]},
+            "properties": {
+                "gml_id": "cities.2",
+                "name": "New York",
+                "population": 8336817,
+                "country": "USA",
+            },
+        },
+        {
+            "type": "Feature",
+            "id": "cities.3",
+            "geometry": {"type": "Point", "coordinates": [-0.1276, 51.5074]},
+            "properties": {
+                "gml_id": "cities.3",
+                "name": "London",
+                "population": 8982000,
+                "country": "UK",
+            },
+        },
+    ],
+    "totalFeatures": 3,
+    "numberMatched": 3,
+    "numberReturned": 3,
+    "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::4326"}},
+}
+
+# GML3 response with 1 feature (WFS 1.1.0 default format)
+MOCK_GML_RESPONSE = """<?xml version="1.0" encoding="UTF-8"?>
+<wfs:FeatureCollection
+    xmlns:wfs="http://www.opengis.net/wfs"
+    xmlns:gml="http://www.opengis.net/gml"
+    xmlns:test="http://mock.wfs.server/test"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    numberOfFeatures="1"
+    timeStamp="2026-03-23T12:00:00Z">
+
+    <gml:boundedBy>
+        <gml:Envelope srsName="urn:ogc:def:crs:EPSG::4326">
+            <gml:lowerCorner>37.7749 -122.4194</gml:lowerCorner>
+            <gml:upperCorner>37.7749 -122.4194</gml:upperCorner>
+        </gml:Envelope>
+    </gml:boundedBy>
+
+    <gml:featureMember>
+        <test:cities gml:id="cities.1">
+            <gml:boundedBy>
+                <gml:Envelope srsName="urn:ogc:def:crs:EPSG::4326">
+                    <gml:lowerCorner>37.7749 -122.4194</gml:lowerCorner>
+                    <gml:upperCorner>37.7749 -122.4194</gml:upperCorner>
+                </gml:Envelope>
+            </gml:boundedBy>
+            <test:geometry>
+                <gml:Point srsName="urn:ogc:def:crs:EPSG::4326">
+                    <gml:pos>37.7749 -122.4194</gml:pos>
+                </gml:Point>
+            </test:geometry>
+            <test:name>San Francisco</test:name>
+            <test:population>884363</test:population>
+            <test:country>USA</test:country>
+        </test:cities>
+    </gml:featureMember>
+</wfs:FeatureCollection>
+"""
+
+# XSD schema response for DescribeFeatureType
+MOCK_DESCRIBE_FEATURE_TYPE = """<?xml version="1.0" encoding="UTF-8"?>
+<xsd:schema
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:gml="http://www.opengis.net/gml"
+    xmlns:test="http://mock.wfs.server/test"
+    targetNamespace="http://mock.wfs.server/test"
+    elementFormDefault="qualified">
+
+    <xsd:import namespace="http://www.opengis.net/gml"
+        schemaLocation="http://schemas.opengis.net/gml/3.1.1/base/gml.xsd"/>
+
+    <xsd:complexType name="citiesType">
+        <xsd:complexContent>
+            <xsd:extension base="gml:AbstractFeatureType">
+                <xsd:sequence>
+                    <xsd:element name="geometry" type="gml:PointPropertyType"
+                        minOccurs="0" maxOccurs="1"/>
+                    <xsd:element name="name" type="xsd:string"
+                        minOccurs="0" maxOccurs="1"/>
+                    <xsd:element name="population" type="xsd:int"
+                        minOccurs="0" maxOccurs="1"/>
+                    <xsd:element name="country" type="xsd:string"
+                        minOccurs="0" maxOccurs="1"/>
+                </xsd:sequence>
+            </xsd:extension>
+        </xsd:complexContent>
+    </xsd:complexType>
+
+    <xsd:element name="cities" type="test:citiesType"
+        substitutionGroup="gml:_Feature"/>
+
+    <xsd:complexType name="roadsType">
+        <xsd:complexContent>
+            <xsd:extension base="gml:AbstractFeatureType">
+                <xsd:sequence>
+                    <xsd:element name="geometry" type="gml:MultiLineStringPropertyType"
+                        minOccurs="0" maxOccurs="1"/>
+                    <xsd:element name="name" type="xsd:string"
+                        minOccurs="0" maxOccurs="1"/>
+                    <xsd:element name="highway_type" type="xsd:string"
+                        minOccurs="0" maxOccurs="1"/>
+                    <xsd:element name="lanes" type="xsd:int"
+                        minOccurs="0" maxOccurs="1"/>
+                </xsd:sequence>
+            </xsd:extension>
+        </xsd:complexContent>
+    </xsd:complexType>
+
+    <xsd:element name="roads" type="test:roadsType"
+        substitutionGroup="gml:_Feature"/>
+</xsd:schema>
+"""
+
+# Empty FeatureCollection response
+MOCK_EMPTY_RESPONSE = {
+    "type": "FeatureCollection",
+    "features": [],
+    "totalFeatures": 0,
+    "numberMatched": 0,
+    "numberReturned": 0,
+    "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::4326"}},
+}
+
+
+# =============================================================================
+# Pytest Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def mock_capabilities_xml():
+    """Return WFS 1.1.0 GetCapabilities XML response.
+
+    Contains 2 feature types:
+    - test:cities (Point geometry, global extent)
+    - test:roads (LineString geometry, USA extent)
+
+    Supports GML 3.1.1 and JSON output formats.
+    """
+    return MOCK_CAPABILITIES_XML
+
+
+@pytest.fixture
+def mock_geojson_response():
+    """Return GeoJSON FeatureCollection with 3 point features.
+
+    Features represent cities:
+    - San Francisco (population: 884363)
+    - New York (population: 8336817)
+    - London (population: 8982000)
+
+    CRS is EPSG:4326 (WGS84).
+    """
+    return MOCK_GEOJSON_RESPONSE
+
+
+@pytest.fixture
+def mock_gml_response():
+    """Return GML3 response with 1 feature.
+
+    Contains a single city (San Francisco) in GML 3.1.1 format.
+    This is the default WFS 1.1.0 GetFeature response format.
+    """
+    return MOCK_GML_RESPONSE
+
+
+@pytest.fixture
+def mock_describe_feature_type():
+    """Return XSD schema response for DescribeFeatureType.
+
+    Describes 2 feature types:
+    - cities: Point geometry with name, population, country fields
+    - roads: MultiLineString geometry with name, highway_type, lanes fields
+    """
+    return MOCK_DESCRIBE_FEATURE_TYPE
+
+
+@pytest.fixture
+def mock_empty_response():
+    """Return empty GeoJSON FeatureCollection.
+
+    Represents a WFS GetFeature response with no matching features.
+    totalFeatures, numberMatched, and numberReturned are all 0.
+    """
+    return MOCK_EMPTY_RESPONSE
+
+
+@pytest.fixture
+def mock_wfs_url():
+    """Return mock WFS server URL."""
+    return "http://mock.wfs.server/wfs"
+
+
+@pytest.fixture
+def mock_wfs_responses(
+    mock_wfs_url,
+    mock_capabilities_xml,
+    mock_geojson_response,
+    mock_gml_response,
+    mock_describe_feature_type,
+    mock_empty_response,
+):
+    """Return dict of all mock WFS responses keyed by request type.
+
+    Useful for setting up comprehensive request mocking.
+    """
+    return {
+        "url": mock_wfs_url,
+        "capabilities": mock_capabilities_xml,
+        "geojson": mock_geojson_response,
+        "gml": mock_gml_response,
+        "describe_feature_type": mock_describe_feature_type,
+        "empty": mock_empty_response,
+    }
+
+
+# =============================================================================
+# Additional Mock Data for Pagination Tests
+# =============================================================================
+
+# First page of 2 features (offset 0)
+MOCK_GEOJSON_PAGE_1 = {
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "id": "cities.1",
+            "geometry": {"type": "Point", "coordinates": [-122.4194, 37.7749]},
+            "properties": {"gml_id": "cities.1", "name": "San Francisco", "population": 884363},
+        },
+        {
+            "type": "Feature",
+            "id": "cities.2",
+            "geometry": {"type": "Point", "coordinates": [-73.9857, 40.7484]},
+            "properties": {"gml_id": "cities.2", "name": "New York", "population": 8336817},
+        },
+    ],
+    "numberMatched": 5,
+    "numberReturned": 2,
+}
+
+# Second page of 2 features (offset 2)
+MOCK_GEOJSON_PAGE_2 = {
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "id": "cities.3",
+            "geometry": {"type": "Point", "coordinates": [-0.1276, 51.5074]},
+            "properties": {"gml_id": "cities.3", "name": "London", "population": 8982000},
+        },
+        {
+            "type": "Feature",
+            "id": "cities.4",
+            "geometry": {"type": "Point", "coordinates": [139.6917, 35.6895]},
+            "properties": {"gml_id": "cities.4", "name": "Tokyo", "population": 13960000},
+        },
+    ],
+    "numberMatched": 5,
+    "numberReturned": 2,
+}
+
+# Third page with 1 feature (offset 4)
+MOCK_GEOJSON_PAGE_3 = {
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "id": "cities.5",
+            "geometry": {"type": "Point", "coordinates": [2.3522, 48.8566]},
+            "properties": {"gml_id": "cities.5", "name": "Paris", "population": 2161000},
+        },
+    ],
+    "numberMatched": 5,
+    "numberReturned": 1,
+}
+
+# Capabilities XML with minimal optional fields (missing Abstract, OtherSRS)
+MOCK_MINIMAL_CAPABILITIES_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<wfs:WFS_Capabilities
+    xmlns:wfs="http://www.opengis.net/wfs"
+    xmlns:ows="http://www.opengis.net/ows"
+    version="1.1.0">
+    <wfs:FeatureTypeList>
+        <wfs:FeatureType>
+            <wfs:Name>minimal:layer</wfs:Name>
+            <wfs:DefaultSRS>urn:ogc:def:crs:EPSG::4326</wfs:DefaultSRS>
+        </wfs:FeatureType>
+    </wfs:FeatureTypeList>
+</wfs:WFS_Capabilities>
+"""
+
+
+@pytest.fixture
+def mock_geojson_page_1():
+    """First page of paginated results."""
+    return MOCK_GEOJSON_PAGE_1
+
+
+@pytest.fixture
+def mock_geojson_page_2():
+    """Second page of paginated results."""
+    return MOCK_GEOJSON_PAGE_2
+
+
+@pytest.fixture
+def mock_geojson_page_3():
+    """Third (final) page of paginated results."""
+    return MOCK_GEOJSON_PAGE_3
+
+
+@pytest.fixture
+def mock_minimal_capabilities_xml():
+    """Minimal capabilities XML with missing optional fields."""
+    return MOCK_MINIMAL_CAPABILITIES_XML
+
+
+# =============================================================================
+# Mock-Based Test Classes
+# =============================================================================
+
+
+class TestCapabilityParsing:
+    """Tests for OWSLib-based capability parsing via mocked WebFeatureService."""
+
+    def _create_mock_wfs(self):
+        """Create a mock OWSLib WebFeatureService object."""
+        mock_wfs = MagicMock()
+
+        # Mock layer contents
+        cities_layer = MagicMock()
+        cities_layer.id = "test:cities"
+        cities_layer.title = "Cities"
+        cities_layer.crsOptions = [
+            "urn:ogc:def:crs:EPSG::4326",
+            "urn:ogc:def:crs:EPSG::3857",
+        ]
+        cities_layer.boundingBoxWGS84 = (-180.0, -90.0, 180.0, 90.0)
+
+        roads_layer = MagicMock()
+        roads_layer.id = "test:roads"
+        roads_layer.title = "Road Network"
+        roads_layer.crsOptions = ["urn:ogc:def:crs:EPSG::4326"]
+        roads_layer.boundingBoxWGS84 = (-125.0, 24.0, -66.0, 50.0)
+
+        mock_wfs.contents = {
+            "test:cities": cities_layer,
+            "test:roads": roads_layer,
+        }
+        mock_wfs.getfeature_output_formats = [
+            "application/json",
+            "application/geo+json",
+            "text/xml; subtype=gml/3.1.1",
+        ]
+
+        return mock_wfs
+
+    @patch("owslib.wfs.WebFeatureService")
+    def test_parses_layer_list(self, mock_wfs_class):
+        """Test that GetCapabilities returns WFS with layer contents."""
+        mock_wfs_class.return_value = self._create_mock_wfs()
+
+        wfs = get_wfs_capabilities("http://mock.wfs.server/wfs")
+
+        # WFS object should have contents with 2 layers
+        assert len(wfs.contents) == 2
+        assert "test:cities" in wfs.contents
+        assert "test:roads" in wfs.contents
+
+    @patch("owslib.wfs.WebFeatureService")
+    def test_extracts_layer_info(self, mock_wfs_class):
+        """Test extraction of layer info via OWSLib interface."""
+        mock_wfs_class.return_value = self._create_mock_wfs()
+
+        wfs = get_wfs_capabilities("http://mock.wfs.server/wfs")
+
+        # Verify cities layer metadata via OWSLib interface
+        cities = wfs.contents["test:cities"]
+        assert cities.title == "Cities"
+        assert "urn:ogc:def:crs:EPSG::4326" in cities.crsOptions
+        assert cities.boundingBoxWGS84 == (-180.0, -90.0, 180.0, 90.0)
+
+        # Verify roads layer
+        roads = wfs.contents["test:roads"]
+        assert roads.boundingBoxWGS84 == (-125.0, 24.0, -66.0, 50.0)
+
+    @patch("owslib.wfs.WebFeatureService")
+    def test_extracts_supported_formats(self, mock_wfs_class):
+        """Test extraction of supported output formats."""
+        mock_wfs_class.return_value = self._create_mock_wfs()
+
+        wfs = get_wfs_capabilities("http://mock.wfs.server/wfs")
+
+        # Check formats via OWSLib interface
+        assert "application/json" in wfs.getfeature_output_formats
+        assert "application/geo+json" in wfs.getfeature_output_formats
+
+    @patch("owslib.wfs.WebFeatureService")
+    def test_handles_connection_error(self, mock_wfs_class):
+        """Test handling of connection errors."""
+        mock_wfs_class.side_effect = Exception("Connection refused")
+        from geoparquet_io.core.wfs import WFSError
+
+        with pytest.raises(WFSError, match="Could not connect|Connection"):
+            get_wfs_capabilities("http://mock.wfs.server/wfs")
+
+
+class TestErrorHandling:
+    """Tests for error handling in WFS module."""
+
+    def test_wfs_error_raised_for_invalid_url(self):
+        """Test that WFSError is raised for connection failures."""
+        from geoparquet_io.core.wfs import WFSError
+
+        # Invalid URL should raise WFSError
+        with pytest.raises(WFSError):
+            get_wfs_capabilities("http://localhost:99999/invalid")
+
+    @patch("owslib.wfs.WebFeatureService")
+    def test_layer_not_found_error(self, mock_wfs_class):
+        """Test error when requested layer doesn't exist."""
+        mock_wfs = MagicMock()
+        # Only "ns:cities" exists, not "nonexistent:data"
+        mock_wfs.contents = {"ns:cities": MagicMock()}
+        mock_wfs_class.return_value = mock_wfs
+
+        from geoparquet_io.core.wfs import WFSError
+
+        with pytest.raises(WFSError, match="not found"):
+            get_layer_info("http://mock.wfs.server/wfs", "nonexistent:data")
+
+
+# Helper Data Structures for Tests
+# =============================================================================
+
+
+class MockLayerInfo:
+    """Mock WFSLayerInfo for unit testing pure logic functions."""
+
+    def __init__(
+        self,
+        typename: str = "test:cities",
+        title: str | None = "Cities",
+        crs_list: list[str] | None = None,
+        default_crs: str | None = "urn:ogc:def:crs:EPSG::4326",
+        bbox: tuple[float, float, float, float] | None = (-180.0, -90.0, 180.0, 90.0),
+        geometry_column: str = "geometry",
+    ):
+        self.typename = typename
+        self.title = title
+        self.crs_list = crs_list or ["urn:ogc:def:crs:EPSG::4326", "urn:ogc:def:crs:EPSG::3857"]
+        self.default_crs = default_crs
+        self.bbox = bbox
+        self.geometry_column = geometry_column
+
+
+class MockCapabilities:
+    """Mock WFS capabilities for unit testing."""
+
+    def __init__(
+        self,
+        supports_bbox: bool = True,
+        version: str = "1.1.0",
+        max_features: int | None = None,
+    ):
+        self.supports_bbox = supports_bbox
+        self.version = version
+        self.max_features = max_features
+
+
+# =============================================================================
+# Unit Tests - Bbox Strategy
+# =============================================================================
+
+
+class TestBboxStrategy:
+    """Test _determine_bbox_strategy() pure logic.
+
+    This function decides whether to use server-side or local bbox filtering.
+    Unlike BigQuery, WFS doesn't expose row counts easily, so auto mode
+    defaults to server-side filtering (conservative for remote services).
+    """
+
+    def _create_mock_layer_info(self):
+        """Create a mock WFSLayerInfo for testing."""
+        return WFSLayerInfo(
+            typename="test:cities",
+            title="Cities",
+            crs_list=["EPSG:4326", "EPSG:3857"],
+            default_crs="EPSG:4326",
+            bbox=(-180.0, -90.0, 180.0, 90.0),
+            geometry_column="geometry",
+            available_formats=["application/json"],
+        )
+
+    @pytest.mark.parametrize(
+        "bbox_mode,expected",
+        [
+            ("server", True),
+            ("local", False),
+        ],
+    )
+    def test_explicit_mode_respected(self, bbox_mode, expected):
+        """Explicit server/local mode bypasses auto-detection logic."""
+        layer_info = self._create_mock_layer_info()
+        result = _determine_bbox_strategy(bbox_mode, layer_info)
+        assert result is expected
+
+    def test_auto_mode_defaults_server_for_wfs(self):
+        """Auto mode defaults to server-side for WFS (conservative choice).
+
+        Unlike BigQuery, WFS servers don't easily expose row counts.
+        Server-side filtering is safer for remote services to avoid
+        downloading large datasets unnecessarily.
+        """
+        layer_info = self._create_mock_layer_info()
+        result = _determine_bbox_strategy("auto", layer_info)
+        assert result is True  # WFS auto mode defaults to server-side
+
+    def test_auto_mode_still_uses_server_with_different_layer_info(self):
+        """Auto mode uses server-side regardless of layer_info (reserved for future)."""
+        # layer_info is reserved for future use (e.g., checking server capabilities)
+        layer_info = WFSLayerInfo(
+            typename="test:layer",
+            title=None,
+            crs_list=[],
+            default_crs=None,
+            bbox=None,
+            geometry_column="geometry",
+            available_formats=[],
+        )
+        result = _determine_bbox_strategy("auto", layer_info)
+        assert result is True  # Still defaults to server-side
+
+
+# =============================================================================
+# Unit Tests - Bbox Filter Construction
+# =============================================================================
+
+
+class TestBboxFilters:
+    """Test bbox filter construction functions.
+
+    Tests both:
+    - WFS bbox parameter string for server-side filtering (_build_bbox_param)
+    - DuckDB SQL expression for local filtering (_build_local_bbox_filter)
+    """
+
+    @pytest.mark.parametrize(
+        "bbox,crs,version,expected_param",
+        [
+            # WFS 1.0.0: xmin,ymin,xmax,ymax (no CRS)
+            ((-122.5, 37.5, -122.0, 38.0), "EPSG:4326", "1.0.0", "-122.5,37.5,-122.0,38.0"),
+            # WFS 1.1.0: xmin,ymin,xmax,ymax,crs
+            (
+                (-122.5, 37.5, -122.0, 38.0),
+                "EPSG:4326",
+                "1.1.0",
+                "-122.5,37.5,-122.0,38.0,EPSG:4326",
+            ),
+            # Integer coordinates
+            ((-180, -90, 180, 90), "EPSG:4326", "1.1.0", "-180,-90,180,90,EPSG:4326"),
+        ],
+    )
+    def test_server_side_bbox_parameter(self, bbox, crs, version, expected_param):
+        """Server-side filtering uses WFS bbox parameter format."""
+        result = _build_bbox_param(bbox, crs, version)
+        assert result == expected_param
+
+    @pytest.mark.parametrize(
+        "bbox,geometry_column",
+        [
+            ((-122.5, 37.5, -122.0, 38.0), "geometry"),
+            ((-122.5, 37.5, -122.0, 38.0), "the_geom"),
+            ((-122.5, 37.5, -122.0, 38.0), "geom"),
+        ],
+    )
+    def test_local_bbox_duckdb_filter(self, bbox, geometry_column):
+        """Local filtering uses DuckDB ST_Intersects expression."""
+        sql = _build_local_bbox_filter(bbox, geometry_column)
+        assert f'"{geometry_column}"' in sql
+        assert "ST_Intersects" in sql
+        assert "ST_GeomFromText" in sql
+        assert "POLYGON" in sql
+
+    def test_local_bbox_polygon_is_closed_ring(self):
+        """DuckDB POLYGON must be a closed ring (first point == last point)."""
+        bbox = (-122.5, 37.5, -122.0, 38.0)
+        sql = _build_local_bbox_filter(bbox, "geometry")
+        # The polygon should start and end at the same point
+        assert "-122.5 37.5" in sql  # First point
+        # Count occurrences - should appear twice (start and end)
+        assert sql.count("-122.5 37.5") == 2
+
+    def test_bbox_with_crs_suffix(self):
+        """WFS 1.1.0 bbox includes CRS suffix."""
+        bbox = (-122.5, 37.5, -122.0, 38.0)
+        crs = "urn:ogc:def:crs:EPSG::4326"
+        result = _build_bbox_param(bbox, crs, "1.1.0")
+        assert result.endswith(crs)
+
+    def test_invalid_geometry_column_rejected(self):
+        """Invalid geometry column names with SQL injection characters are rejected."""
+        bbox = (-122.5, 37.5, -122.0, 38.0)
+        with pytest.raises(WFSError, match="Invalid geometry column name"):
+            _build_local_bbox_filter(bbox, 'geom"; DROP TABLE --')
+
+
+# =============================================================================
+# Unit Tests - Output Format Detection
+# =============================================================================
+
+
+class TestFormatDetection:
+    """Test _detect_best_output_format() format preference logic.
+
+    GeoJSON is preferred for speed, with fallbacks to GML variants.
+    """
+
+    @pytest.mark.parametrize(
+        "available_formats,expected_format",
+        [
+            # GeoJSON variants (preferred)
+            (["application/json", "text/xml; subtype=gml/3.1.1"], "application/json"),
+            (["json", "gml3"], "json"),
+            (["geojson", "gml2"], "geojson"),
+            (["application/geo+json", "application/xml"], "application/geo+json"),
+            # GML3 when no JSON
+            (
+                ["text/xml; subtype=gml/3.1.1", "text/xml; subtype=gml/2.1.2"],
+                "text/xml; subtype=gml/3.1.1",
+            ),
+            (["gml3", "gml2"], "gml3"),
+            # GML2 as last resort
+            (["text/xml; subtype=gml/2.1.2"], "text/xml; subtype=gml/2.1.2"),
+            (["gml2"], "gml2"),
+            # Unknown format - return first available
+            (["application/x-custom", "unknown/type"], "application/x-custom"),
+        ],
+    )
+    def test_format_preference_order(self, available_formats, expected_format):
+        """Formats are selected in order: GeoJSON > GML3 > GML2 > first available."""
+        result = _detect_best_output_format(available_formats)
+        assert result == expected_format
+
+    def test_empty_formats_returns_default(self):
+        """Empty format list returns default GML3."""
+        result = _detect_best_output_format([])
+        assert result == "GML3"
+
+    @pytest.mark.parametrize(
+        "format_string,expected_is_json",
+        [
+            ("application/json", True),
+            ("json", True),
+            ("geojson", True),
+            ("application/geo+json", True),
+            ("gml3", False),
+        ],
+    )
+    def test_geojson_detection(self, format_string, expected_is_json):
+        """GeoJSON format detection is case-insensitive."""
+        # Test both lowercase and uppercase
+        formats_lower = [format_string.lower(), "gml2"]
+        formats_upper = [format_string.upper(), "gml2"]
+
+        result_lower = _detect_best_output_format(formats_lower)
+        result_upper = _detect_best_output_format(formats_upper)
+
+        if expected_is_json:
+            # JSON formats should be selected over GML
+            assert "json" in result_lower.lower() or "geo" in result_lower.lower()
+            assert "json" in result_upper.lower() or "geo" in result_upper.lower()
+        else:
+            # Non-JSON GML formats - gml3 should be preferred over gml2
+            assert result_lower == format_string.lower()
+
+    def test_gml_version_preference(self):
+        """Prefer GML 3.x over GML 2.x for better geometry support."""
+        formats = ["gml2", "gml3"]
+        result = _detect_best_output_format(formats)
+        assert result == "gml3"  # GML3 preferred over GML2
+
+
+# =============================================================================
+# Unit Tests - CRS Negotiation
+# =============================================================================
+
+
+class TestCRSNegotiation:
+    """Test _negotiate_crs() CRS selection logic.
+
+    Strategy:
+    1. If --output-crs specified and supported → use it
+    2. Try EPSG:4326 variants (most universal)
+    3. Fall back to server default
+    """
+
+    def _create_layer_info(self, crs_list, default_crs=None):
+        """Helper to create WFSLayerInfo with CRS settings."""
+        return WFSLayerInfo(
+            typename="test:layer",
+            title="Test",
+            crs_list=crs_list,
+            default_crs=default_crs or (crs_list[0] if crs_list else None),
+            bbox=None,
+            geometry_column="geometry",
+            available_formats=["application/json"],
+        )
+
+    @pytest.mark.parametrize(
+        "crs_list,output_crs,expected",
+        [
+            # Explicit output_crs respected when available
+            (["EPSG:4326", "EPSG:3857"], "EPSG:3857", "EPSG:3857"),
+            (["urn:ogc:def:crs:EPSG::4326", "EPSG:3857"], "EPSG:3857", "EPSG:3857"),
+            # EPSG:4326 variants matched when no output_crs
+            (["urn:ogc:def:crs:EPSG::4326"], None, "urn:ogc:def:crs:EPSG::4326"),
+            (["EPSG:4326", "EPSG:3857"], None, "EPSG:4326"),
+            (
+                ["http://www.opengis.net/def/crs/EPSG/0/4326"],
+                None,
+                "http://www.opengis.net/def/crs/EPSG/0/4326",
+            ),
+        ],
+    )
+    def test_crs_selection_priority(self, crs_list, output_crs, expected):
+        """CRS selection follows priority: explicit > EPSG:4326 > server default."""
+        layer_info = self._create_layer_info(crs_list)
+        result = _negotiate_crs(layer_info, output_crs)
+        assert result == expected
+
+    def test_fallback_to_server_default(self):
+        """Fall back to default_crs when EPSG:4326 not available."""
+        layer_info = self._create_layer_info(
+            crs_list=["EPSG:32610", "EPSG:32611"],  # UTM zones, no WGS84
+            default_crs="EPSG:32610",
+        )
+        result = _negotiate_crs(layer_info, None)
+        assert result == "EPSG:32610"
+
+    def test_unsupported_output_crs_falls_back(self):
+        """When requested CRS not in supported list, fall back to available."""
+        layer_info = self._create_layer_info(crs_list=["EPSG:4326"])
+        # Request unsupported CRS - should fall back to EPSG:4326
+        result = _negotiate_crs(layer_info, "EPSG:2154")  # French Lambert
+        assert result == "EPSG:4326"
+
+    @pytest.mark.parametrize(
+        "crs_variant,expected_normalized",
+        [
+            ("EPSG:4326", "EPSG:4326"),
+            ("urn:ogc:def:crs:EPSG::4326", "EPSG:4326"),
+            ("http://www.opengis.net/def/crs/EPSG/0/4326", "EPSG:4326"),
+            ("EPSG:3857", "EPSG:3857"),
+            ("urn:ogc:def:crs:EPSG::3857", "EPSG:3857"),
+        ],
+    )
+    def test_crs_variant_normalization(self, crs_variant, expected_normalized):
+        """Different CRS URI formats should normalize to same EPSG code."""
+        result = _normalize_crs(crs_variant)
+        assert result == expected_normalized
+
+    def test_empty_crs_list_uses_default(self):
+        """Use default_crs when crs_list is empty."""
+        layer_info = self._create_layer_info(crs_list=[], default_crs="EPSG:4326")
+        result = _negotiate_crs(layer_info, None)
+        assert result == "EPSG:4326"
+
+    def test_no_crs_available_returns_4326(self):
+        """When no CRS info at all, default to EPSG:4326."""
+        layer_info = self._create_layer_info(crs_list=[], default_crs=None)
+        result = _negotiate_crs(layer_info, None)
+        assert result == "EPSG:4326"
+
+
+# =============================================================================
+# Unit Tests - Namespace Resolution
+# =============================================================================
+
+
+class TestNamespaceResolution:
+    """Test typename namespace matching and sanitization logic."""
+
+    @pytest.mark.parametrize(
+        "column_name,should_pass",
+        [
+            ("geometry", True),
+            ("the_geom", True),
+            ("geom123", True),
+            ("_private_geom", True),
+            ('geom"injection', False),
+            ("geom;drop", False),
+            ("geom--comment", False),
+        ],
+    )
+    def test_validate_identifier(self, column_name, should_pass):
+        """Identifier validation catches SQL injection attempts."""
+        if should_pass:
+            result = _validate_identifier(column_name)
+            assert result == column_name
+        else:
+            with pytest.raises(WFSError, match="Invalid geometry column name"):
+                _validate_identifier(column_name)
+
+
+# =============================================================================
+# Integration Tests (require network)
+# =============================================================================
+
+
+@pytest.mark.network
+@pytest.mark.slow
+class TestWFSIntegration:
+    """Integration tests against real WFS services."""
+
+    # Transport for Cairo GeoServer (known to support GeoJSON)
+    WFS_URL = "https://data.transportforcairo.com/geoserver/geonode/ows"
+    TYPENAME = "geonode:cairo_od_stats"
+
+    def test_list_available_layers(self):
+        """Test listing layers from real WFS."""
+
+        # Should not raise - just verify it runs
+        layers = list_available_layers(self.WFS_URL)
+        assert len(layers) > 0
+
+    def test_extract_with_limit(self, tmp_path):
+        """Test extracting features with limit."""
+        from geoparquet_io.core.wfs import convert_wfs_to_geoparquet
+
+        output = tmp_path / "cairo_test.parquet"
+        convert_wfs_to_geoparquet(
+            self.WFS_URL,
+            self.TYPENAME,
+            str(output),
+            limit=10,
+            skip_hilbert=True,
+            skip_bbox=True,
+        )
+        import pyarrow.parquet as pq
+
+        table = pq.read_table(output)
+        assert table.num_rows <= 10
+        assert "geometry" in table.column_names
+
+    def test_extract_with_bbox(self, tmp_path):
+        """Test bbox filtering (Cairo region)."""
+        from geoparquet_io.core.wfs import convert_wfs_to_geoparquet
+
+        output = tmp_path / "bbox_test.parquet"
+        # Cairo bbox (roughly)
+        convert_wfs_to_geoparquet(
+            self.WFS_URL,
+            self.TYPENAME,
+            str(output),
+            bbox=(31.2, 29.9, 31.3, 30.0),
+            bbox_mode="server",
+            limit=5,
+            skip_hilbert=True,
+            skip_bbox=True,
+        )
+        import pyarrow.parquet as pq
+
+        table = pq.read_table(output)
+        assert table.num_rows >= 0  # May be 0 if no data in bbox
+
+    def test_python_api(self):
+        """Test Python API."""
+        from geoparquet_io.api import Table
+
+        table = Table.from_wfs(
+            self.WFS_URL,
+            self.TYPENAME,
+            limit=5,
+        )
+        assert table.num_rows <= 5
+
+
+# =============================================================================
+# CLI Ergonomics Tests
+# =============================================================================
+
+
+class TestWFSCLIErgonomics:
+    """Test CLI option naming consistency with ArcGIS."""
+
+    def test_cli_uses_workers_option(self):
+        """WFS CLI should use --workers like ArcGIS, not --max-workers."""
+        from click.testing import CliRunner
+
+        from geoparquet_io.cli.main import cli
+
+        runner = CliRunner()
+        # Test that --workers is recognized
+        result = runner.invoke(cli, ["extract", "wfs", "--help"])
+        assert result.exit_code == 0
+        # Should have --workers option
+        assert "--workers" in result.output
+        # Should NOT have --max-workers option
+        assert "--max-workers" not in result.output
+
+    def test_workers_capped_at_10(self):
+        """Workers should be capped at 10 in CLI validation."""
+        from click.testing import CliRunner
+
+        from geoparquet_io.cli.main import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["extract", "wfs", "--help"])
+        # Should have --workers option with max of 10
+        assert "--workers" in result.output
+        # Click displays IntRange as [1<=x<=10]
+        assert "[1<=x<=10]" in result.output
+
+
+# =============================================================================
+# DuckDB-Native WFS Fetch Tests
+# =============================================================================
+
+
+@pytest.mark.network
+@pytest.mark.slow
+class TestDuckDBNativeWFS:
+    """Test DuckDB-native WFS fetching using httpfs and read_json_auto."""
+
+    # Use Transport for Cairo GeoServer (known to support GeoJSON)
+    WFS_URL = (
+        "https://data.transportforcairo.com/geoserver/geonode/ows?"
+        "service=WFS&version=1.1.0&request=GetFeature"
+        "&typeName=geonode:cairo_od_stats"
+        "&outputFormat=application/json"
+        "&maxFeatures=10"
+    )
+
+    def test_fetch_wfs_page_duckdb_returns_arrow_table(self):
+        """DuckDB-native fetch should return an Arrow table with geometry."""
+        from geoparquet_io.core.wfs import _fetch_wfs_page_duckdb
+
+        table = _fetch_wfs_page_duckdb(self.WFS_URL)
+
+        # Should return Arrow table
+        import pyarrow as pa
+
+        assert isinstance(table, pa.Table)
+        # Should have geometry column
+        assert "geometry" in table.column_names
+        # Should have some rows
+        assert table.num_rows > 0
+        assert table.num_rows <= 10
+
+    def test_fetch_wfs_page_duckdb_geometry_is_wkb(self):
+        """Geometry should be WKB binary format."""
+        from geoparquet_io.core.wfs import _fetch_wfs_page_duckdb
+
+        table = _fetch_wfs_page_duckdb(self.WFS_URL)
+
+        # Geometry should be binary (WKB)
+        import pyarrow as pa
+
+        geom_type = table.schema.field("geometry").type
+        assert pa.types.is_binary(geom_type) or pa.types.is_large_binary(geom_type)
