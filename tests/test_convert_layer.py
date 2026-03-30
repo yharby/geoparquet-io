@@ -9,13 +9,15 @@ Test fixtures:
   Created from buildings_test.gpkg and buildings_test.geojson using ogr2ogr
 - FileGDB: From GDAL test suite (testopenfilegdb.gdb) with 37 layers
   Source: https://github.com/OSGeo/gdal/tree/master/autotest/ogr/data/filegdb
+  License: MIT/X (GDAL project)
 """
 
 import pyarrow.parquet as pq
 import pytest
+from click.testing import CliRunner
 
 from geoparquet_io.api.table import convert
-from geoparquet_io.core.convert import read_spatial_to_arrow
+from geoparquet_io.core.convert import _validate_layer_name, read_spatial_to_arrow
 
 
 @pytest.fixture
@@ -159,3 +161,128 @@ class TestFileGDBLayer:
         # At minimum, both should succeed
         assert point_result.table.num_rows > 0
         assert polygon_result.table.num_rows > 0
+
+
+class TestLayerValidation:
+    """Tests for layer name validation and SQL injection protection."""
+
+    def test_validate_layer_name_normal(self):
+        """Normal layer names should pass validation."""
+        assert _validate_layer_name("buildings") == "buildings"
+        assert _validate_layer_name("my_layer") == "my_layer"
+        assert _validate_layer_name("Layer 1") == "Layer 1"
+        assert _validate_layer_name("layer-with-dashes") == "layer-with-dashes"
+
+    def test_validate_layer_name_escapes_quotes(self):
+        """Single quotes in layer names should be escaped."""
+        # Single quote should be doubled (SQL standard)
+        assert _validate_layer_name("O'Brien's Layer") == "O''Brien''s Layer"
+        assert _validate_layer_name("test'layer") == "test''layer"
+
+    def test_validate_layer_name_blocks_sql_injection(self):
+        """SQL injection patterns should be rejected."""
+        with pytest.raises(ValueError, match="unsafe character"):
+            _validate_layer_name("layer'; DROP TABLE users; --")
+
+        with pytest.raises(ValueError, match="unsafe character"):
+            _validate_layer_name("layer/*comment*/")
+
+        with pytest.raises(ValueError, match="unsafe character"):
+            _validate_layer_name("layer\\injection")
+
+    def test_validate_layer_name_blocks_comment_sequences(self):
+        """SQL comment sequences should be blocked."""
+        with pytest.raises(ValueError, match="unsafe character"):
+            _validate_layer_name("layer--comment")
+
+        with pytest.raises(ValueError, match="unsafe character"):
+            _validate_layer_name("/* injection */")
+
+
+class TestConvertLayerCLI:
+    """CLI integration tests for the --layer option."""
+
+    def test_cli_convert_geoparquet_help_shows_layer(self):
+        """CLI help should show the --layer option."""
+        from geoparquet_io.cli.main import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["convert", "geoparquet", "--help"])
+
+        assert result.exit_code == 0
+        assert "--layer" in result.output
+        assert "GeoPackage" in result.output or "FileGDB" in result.output
+
+    def test_cli_convert_with_layer(self, multilayer_gpkg, tmp_path):
+        """CLI should accept --layer option and convert specific layer."""
+        from geoparquet_io.cli.main import cli
+
+        output = tmp_path / "buildings.parquet"
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "convert",
+                "geoparquet",
+                multilayer_gpkg,
+                str(output),
+                "--layer",
+                "buildings",
+                "--skip-hilbert",
+            ],
+        )
+
+        assert result.exit_code == 0, f"CLI failed: {result.output}"
+        assert output.exists()
+
+        # Verify output has expected rows
+        table = pq.read_table(str(output))
+        assert table.num_rows == 42
+
+    def test_cli_convert_different_layers_produce_different_output(self, multilayer_gpkg, tmp_path):
+        """Different --layer values should produce different outputs."""
+        from geoparquet_io.cli.main import cli
+
+        runner = CliRunner()
+
+        # Convert buildings layer
+        buildings_output = tmp_path / "buildings.parquet"
+        result1 = runner.invoke(
+            cli,
+            [
+                "convert",
+                "geoparquet",
+                multilayer_gpkg,
+                str(buildings_output),
+                "--layer",
+                "buildings",
+                "--skip-hilbert",
+            ],
+        )
+        assert result1.exit_code == 0
+
+        # Convert roads layer
+        roads_output = tmp_path / "roads.parquet"
+        result2 = runner.invoke(
+            cli,
+            [
+                "convert",
+                "geoparquet",
+                multilayer_gpkg,
+                str(roads_output),
+                "--layer",
+                "roads",
+                "--skip-hilbert",
+            ],
+        )
+        assert result2.exit_code == 0
+
+        # Both should exist and have data
+        assert buildings_output.exists()
+        assert roads_output.exists()
+
+        buildings_table = pq.read_table(str(buildings_output))
+        roads_table = pq.read_table(str(roads_output))
+
+        assert buildings_table.num_rows == 42
+        assert roads_table.num_rows == 42

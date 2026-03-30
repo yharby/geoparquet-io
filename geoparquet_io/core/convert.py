@@ -30,6 +30,33 @@ from geoparquet_io.core.partition_reader import require_single_file
 from geoparquet_io.core.stream_io import _quote_identifier
 
 
+def _validate_layer_name(layer: str) -> str:
+    """Validate and sanitize a layer name for use in SQL.
+
+    Layer names in GeoPackage/FileGDB can contain letters, numbers, underscores,
+    and spaces. We escape single quotes to prevent SQL injection.
+
+    Args:
+        layer: Layer name to validate
+
+    Returns:
+        Sanitized layer name safe for SQL interpolation
+
+    Raises:
+        ValueError: If layer name contains dangerous characters
+    """
+    # Block obviously malicious patterns
+    dangerous_patterns = ["--", ";", "/*", "*/", "\\"]
+    for pattern in dangerous_patterns:
+        if pattern in layer:
+            raise ValueError(
+                f"Invalid layer name '{layer}': contains unsafe character sequence '{pattern}'"
+            )
+
+    # Escape single quotes (SQL standard: double them)
+    return layer.replace("'", "''")
+
+
 def _build_st_read_expr(input_url: str, layer: str | None = None) -> str:
     """Build ST_Read expression with optional layer parameter.
 
@@ -39,10 +66,20 @@ def _build_st_read_expr(input_url: str, layer: str | None = None) -> str:
 
     Returns:
         SQL expression for ST_Read
+
+    Raises:
+        ValueError: If layer name contains invalid characters
+
+    Warning:
+        DuckDB's ST_Read may segfault (not raise an exception) when given an
+        invalid layer name that doesn't exist in the file. This is an upstream
+        bug. Consider validating layer names against the file's available layers
+        before calling this function if user input is involved.
     """
     if layer:
+        safe_layer = _validate_layer_name(layer)
         # DuckDB uses := for named parameters
-        return f"ST_Read('{input_url}', layer := '{layer}')"
+        return f"ST_Read('{input_url}', layer := '{safe_layer}')"
     return f"ST_Read('{input_url}')"
 
 
