@@ -1084,6 +1084,10 @@ def convert(ctx):
     help="CSV/TSV: Delimiter character (auto-detected if not specified). Common: ',' (comma), '\\t' (tab), ';' (semicolon), '|' (pipe)",
 )
 @click.option(
+    "--layer",
+    help="GeoPackage/FileGDB: Layer name to read (reads first layer if not specified)",
+)
+@click.option(
     "--crs",
     default="EPSG:4326",
     show_default=True,
@@ -1119,6 +1123,7 @@ def convert_to_geoparquet_cmd(
     lat_column,
     lon_column,
     delimiter,
+    layer,
     crs,
     skip_invalid,
     csv_max_line_size,
@@ -1184,6 +1189,7 @@ def convert_to_geoparquet_cmd(
             lat_column=lat_column,
             lon_column=lon_column,
             delimiter=delimiter,
+            layer=layer,
             crs=crs,
             skip_invalid=skip_invalid,
             allow_no_geometry=allow_no_geometry,
@@ -1208,6 +1214,7 @@ def convert_to_geoparquet_cmd(
             lat_column=lat_column,
             lon_column=lon_column,
             delimiter=delimiter,
+            layer=layer,
             crs=crs,
             skip_invalid=skip_invalid,
             allow_no_geometry=allow_no_geometry,
@@ -1223,6 +1230,7 @@ def _convert_streaming(
     lat_column,
     lon_column,
     delimiter,
+    layer,
     crs,
     skip_invalid,
     allow_no_geometry,
@@ -1259,6 +1267,7 @@ def _convert_streaming(
             lat_column=lat_column,
             lon_column=lon_column,
             delimiter=delimiter,
+            layer=layer,
             crs=crs,
             skip_invalid=skip_invalid,
             profile=profile,
