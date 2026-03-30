@@ -200,6 +200,43 @@ All formats support cloud destinations via upload:
     gpio.upload('local.gpkg', 's3://bucket/output.gpkg')
     ```
 
+## Multi-Layer Formats
+
+GeoPackage and FileGDB files can contain multiple layers. By default, the first layer is read. Use `--layer` to select a specific layer.
+
+=== "CLI"
+
+    ```bash
+    # Read specific layer from GeoPackage
+    gpio convert geoparquet multilayer.gpkg buildings.parquet --layer buildings
+
+    # Read specific layer from FileGDB
+    gpio convert geoparquet data.gdb roads.parquet --layer roads
+
+    # Without --layer, reads the first/default layer
+    gpio convert geoparquet data.gpkg output.parquet
+    ```
+
+=== "Python"
+
+    ```python
+    import geoparquet_io as gpio
+
+    # Read specific layer
+    gpio.convert('multilayer.gpkg', layer='buildings').write('buildings.parquet')
+    gpio.convert('multilayer.gpkg', layer='roads').write('roads.parquet')
+
+    # Read first layer (default)
+    gpio.convert('multilayer.gpkg').write('output.parquet')
+    ```
+
+!!! warning "Invalid Layer Names"
+    Due to an upstream bug in DuckDB's spatial extension, specifying a non-existent layer name may cause a crash instead of raising an error. Ensure layer names are valid before conversion. You can inspect available layers using tools like `ogrinfo`:
+
+    ```bash
+    ogrinfo multilayer.gpkg
+    ```
+
 ## Remote Files
 
 Read from cloud storage or HTTPS:

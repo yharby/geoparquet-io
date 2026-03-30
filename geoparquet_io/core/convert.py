@@ -30,7 +30,60 @@ from geoparquet_io.core.partition_reader import require_single_file
 from geoparquet_io.core.stream_io import _quote_identifier
 
 
-def _detect_geometry_column(con, input_file, verbose, is_parquet=False):
+def _validate_layer_name(layer: str) -> str:
+    """Validate and sanitize a layer name for use in SQL.
+
+    Layer names in GeoPackage/FileGDB can contain letters, numbers, underscores,
+    and spaces. We escape single quotes to prevent SQL injection.
+
+    Args:
+        layer: Layer name to validate
+
+    Returns:
+        Sanitized layer name safe for SQL interpolation
+
+    Raises:
+        ValueError: If layer name contains dangerous characters
+    """
+    # Block obviously malicious patterns
+    dangerous_patterns = ["--", ";", "/*", "*/", "\\"]
+    for pattern in dangerous_patterns:
+        if pattern in layer:
+            raise ValueError(
+                f"Invalid layer name '{layer}': contains unsafe character sequence '{pattern}'"
+            )
+
+    # Escape single quotes (SQL standard: double them)
+    return layer.replace("'", "''")
+
+
+def _build_st_read_expr(input_url: str, layer: str | None = None) -> str:
+    """Build ST_Read expression with optional layer parameter.
+
+    Args:
+        input_url: Path or URL to the spatial file
+        layer: Optional layer name for multi-layer formats (GeoPackage, FileGDB)
+
+    Returns:
+        SQL expression for ST_Read
+
+    Raises:
+        ValueError: If layer name contains invalid characters
+
+    Warning:
+        DuckDB's ST_Read may segfault (not raise an exception) when given an
+        invalid layer name that doesn't exist in the file. This is an upstream
+        bug. Consider validating layer names against the file's available layers
+        before calling this function if user input is involved.
+    """
+    if layer:
+        safe_layer = _validate_layer_name(layer)
+        # DuckDB uses := for named parameters
+        return f"ST_Read('{input_url}', layer := '{safe_layer}')"
+    return f"ST_Read('{input_url}')"
+
+
+def _detect_geometry_column(con, input_file, verbose, is_parquet=False, layer=None):
     """Detect geometry column name from input file."""
     if verbose:
         debug("Detecting geometry column from input...")
@@ -39,7 +92,8 @@ def _detect_geometry_column(con, input_file, verbose, is_parquet=False):
     if is_parquet:
         detect_query = f"SELECT * FROM read_parquet('{input_file}') LIMIT 0"
     else:
-        detect_query = f"SELECT * FROM ST_Read('{input_file}') LIMIT 0"
+        table_expr = _build_st_read_expr(input_file, layer)
+        detect_query = f"SELECT * FROM {table_expr} LIMIT 0"
 
     schema_result = con.execute(detect_query).description
 
@@ -610,6 +664,7 @@ def _build_conversion_query(
     skip_hilbert,
     bounds=None,
     is_parquet=False,
+    layer=None,
     skip_bbox=False,
     existing_bbox_col=None,
     preserve_existing_bbox=False,
@@ -622,6 +677,7 @@ def _build_conversion_query(
         skip_hilbert: Skip Hilbert ordering
         bounds: Tuple of (xmin, ymin, xmax, ymax) for Hilbert ordering
         is_parquet: Whether input is a parquet file
+        layer: Layer name for multi-layer formats (GeoPackage, FileGDB)
         skip_bbox: Skip adding bbox column (for 2.0/parquet-geo-only)
         existing_bbox_col: Name of existing bbox column to remove (for parquet input)
         preserve_existing_bbox: If True, keep existing bbox column instead of adding new one
@@ -630,7 +686,7 @@ def _build_conversion_query(
     if is_parquet:
         table_expr = f"read_parquet('{input_file}')"
     else:
-        table_expr = f"ST_Read('{input_file}')"
+        table_expr = _build_st_read_expr(input_file, layer)
 
     # Build exclusion list - always exclude geom_column, optionally exclude existing bbox
     exclude_cols = [geom_column]
@@ -767,12 +823,14 @@ def _convert_csv_path(
 
 
 def _convert_spatial_path(
-    con, input_file, skip_hilbert, verbose, is_parquet=False, geoparquet_version=None
+    con, input_file, skip_hilbert, verbose, is_parquet=False, layer=None, geoparquet_version=None
 ):
     """Handle standard spatial format conversion path. Returns SQL query."""
     from geoparquet_io.core.common import check_bbox_structure, should_skip_bbox
 
-    geom_column = _detect_geometry_column(con, input_file, verbose, is_parquet=is_parquet)
+    geom_column = _detect_geometry_column(
+        con, input_file, verbose, is_parquet=is_parquet, layer=layer
+    )
     if geom_column is None:
         return None
 
@@ -824,6 +882,7 @@ def _convert_spatial_path(
         skip_hilbert,
         bounds,
         is_parquet=is_parquet,
+        layer=layer,
         skip_bbox=skip_bbox,
         existing_bbox_col=existing_bbox_col,
         preserve_existing_bbox=preserve_existing_bbox,
@@ -842,6 +901,7 @@ def read_spatial_to_arrow(
     skip_invalid=False,
     profile=None,
     geometry_column="geometry",
+    layer=None,
 ):
     """
     Read a geospatial file and return an Arrow table with geometry.
@@ -860,6 +920,8 @@ def read_spatial_to_arrow(
         skip_invalid: Skip rows with invalid geometries instead of failing
         profile: AWS profile name for S3 operations
         geometry_column: Name for output geometry column (default: 'geometry')
+        layer: Layer name for multi-layer formats (GeoPackage, FileGDB). If not specified,
+               reads the first/default layer.
 
     Returns:
         tuple: (arrow_table, detected_crs_projjson, geometry_column_name)
@@ -934,7 +996,9 @@ def read_spatial_to_arrow(
                 con, input_url, delimiter, wkt_column, lat_column, lon_column, skip_invalid, verbose
             )
         else:
-            arrow_table = _read_spatial_to_arrow(con, input_url, verbose, is_parquet=is_parquet)
+            arrow_table = _read_spatial_to_arrow(
+                con, input_url, verbose, is_parquet=is_parquet, layer=layer
+            )
 
         # No geometry found — read as plain table
         if arrow_table is None:
@@ -944,7 +1008,7 @@ def read_spatial_to_arrow(
                 table_expr = _build_csv_read_expr(input_url, delimiter)
             else:
                 # Spatial formats (GeoJSON, Shapefile, GeoPackage, etc.)
-                table_expr = f"ST_Read('{input_url}')"
+                table_expr = _build_st_read_expr(input_url, layer)
             arrow_table = con.execute(f"SELECT * FROM {table_expr}").arrow().read_all()
             return arrow_table, None, None
 
@@ -1034,9 +1098,11 @@ def _read_csv_to_arrow(
     return result.arrow().read_all()
 
 
-def _read_spatial_to_arrow(con, input_url, verbose, is_parquet=False):
+def _read_spatial_to_arrow(con, input_url, verbose, is_parquet=False, layer=None):
     """Read spatial file to Arrow table with geometry as WKB. Returns None if no geometry."""
-    geom_column = _detect_geometry_column(con, input_url, verbose, is_parquet=is_parquet)
+    geom_column = _detect_geometry_column(
+        con, input_url, verbose, is_parquet=is_parquet, layer=layer
+    )
     if geom_column is None:
         warn("No geometry column found in input file. Reading as plain table.")
         return None
@@ -1045,7 +1111,7 @@ def _read_spatial_to_arrow(con, input_url, verbose, is_parquet=False):
     if is_parquet:
         table_expr = f"read_parquet('{input_url}')"
     else:
-        table_expr = f"ST_Read('{input_url}')"
+        table_expr = _build_st_read_expr(input_url, layer)
 
     # Convert geometry to WKB for geoarrow compatibility
     query = f"""
@@ -1140,6 +1206,7 @@ def convert_to_geoparquet(
     lat_column=None,
     lon_column=None,
     delimiter=None,
+    layer=None,
     crs="EPSG:4326",
     skip_invalid=False,
     allow_no_geometry=False,
@@ -1169,6 +1236,7 @@ def convert_to_geoparquet(
         lat_column: CSV/TSV only - Latitude column name (requires lon_column)
         lon_column: CSV/TSV only - Longitude column name (requires lat_column)
         delimiter: CSV/TSV only - Delimiter character (auto-detected if not specified)
+        layer: GeoPackage/FileGDB only - Layer name (reads first layer if not specified)
         crs: CRS for geometry data (default: EPSG:4326/WGS84)
         skip_invalid: Skip rows with invalid geometries instead of failing
         allow_no_geometry: Allow conversion to plain Parquet if no geometry detected
@@ -1222,6 +1290,7 @@ def convert_to_geoparquet(
                 skip_hilbert,
                 verbose,
                 is_parquet=is_parquet,
+                layer=layer,
                 geoparquet_version=geoparquet_version,
             )
 

@@ -246,11 +246,12 @@ def convert(
     delimiter: str | None = None,
     skip_invalid: bool = False,
     profile: str | None = None,
+    layer: str | None = None,
 ) -> Table:
     """
     Convert a geospatial file to a Table.
 
-    Supports: GeoPackage, GeoJSON, Shapefile, FlatGeobuf, CSV/TSV (with WKT or lat/lon).
+    Supports: GeoPackage, GeoJSON, Shapefile, FlatGeobuf, FileGDB, CSV/TSV (with WKT or lat/lon).
     Unlike the CLI convert command, this does NOT apply Hilbert sorting by default.
     Chain .sort_hilbert() explicitly if you want spatial ordering.
 
@@ -263,6 +264,8 @@ def convert(
         delimiter: For CSV: field delimiter (auto-detected if not specified)
         skip_invalid: Skip invalid geometries instead of erroring
         profile: AWS profile name for S3 authentication (default: None)
+        layer: Layer name for multi-layer formats (GeoPackage, FileGDB). If not specified,
+               reads the first/default layer.
 
     Returns:
         Table for chaining operations
@@ -272,6 +275,7 @@ def convert(
         >>> gpio.convert('data.gpkg').sort_hilbert().write('out.parquet')
         >>> gpio.convert('data.csv', lat_column='lat', lon_column='lon').write('out.parquet')
         >>> gpio.convert('s3://bucket/data.gpkg', profile='my-aws').write('out.parquet')
+        >>> gpio.convert('multilayer.gpkg', layer='buildings').write('buildings.parquet')
     """
     from geoparquet_io.core.convert import read_spatial_to_arrow
 
@@ -285,6 +289,7 @@ def convert(
         skip_invalid=skip_invalid,
         profile=profile,
         geometry_column=geometry_column,
+        layer=layer,
     )
 
     return Table(arrow_table, geometry_column=geom_col)
