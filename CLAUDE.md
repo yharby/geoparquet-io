@@ -145,7 +145,7 @@ from geoparquet_io.core.common import is_remote_url, remote_write_context, setup
 
 ---
 
-<!-- freshness: last-verified: 2026-03-23, maps-to: pyproject.toml -->
+<!-- freshness: last-verified: 2026-03-30, maps-to: pyproject.toml -->
 ## Testing with uv
 
 ```bash

@@ -82,13 +82,9 @@ class TestSecurityScanResults:
 
     @pytest.mark.network
     def test_pip_audit_passes(self):
-        """Verify no known vulnerabilities in dependencies.
-
-        Note: CVE-2026-4539 (pygments ReDoS in AdlLexer) is suppressed because
-        there is no upstream fix yet and severity is low (CVSS 3.3, local only).
-        """
+        """Verify no known vulnerabilities in dependencies."""
         result = subprocess.run(
-            ["uv", "run", "pip-audit", "--ignore-vuln", "CVE-2026-4539"],
+            ["uv", "run", "pip-audit"],
             capture_output=True,
             text=True,
             timeout=_SUBPROCESS_TIMEOUT,

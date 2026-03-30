@@ -77,8 +77,7 @@ jobs:
         run: uv run bandit -r geoparquet_io/ -c pyproject.toml
 
       - name: Dependency audit
-        # --ignore-vuln CVE-2026-4539: pygments ReDoS in AdlLexer, no upstream fix yet (low severity)
-        run: uv run pip-audit --ignore-vuln CVE-2026-4539
+        run: uv run pip-audit
 
   test:
     runs-on: ${{ matrix.os }}
