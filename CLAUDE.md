@@ -109,7 +109,7 @@ geoparquet_io/
 | `benchmark.py` | Benchmark utilities for comparing GeoParquet conve... | 701 |
 | `partition_admin_hierarchical.py` |  | 698 |
 | `upload.py` | Upload GeoParquet files to cloud object storage. | 675 |
-| ... | *37 more modules* | |
+| ... | *38 more modules* | |
 <!-- END GENERATED: core-modules -->
 
 <!-- freshness: last-verified: 2026-03-20, maps-to: geoparquet_io/core/common.py, geoparquet_io/cli/decorators.py -->
