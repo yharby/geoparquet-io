@@ -154,6 +154,14 @@ def _is_parquet_file(input_file):
     return ext == ".parquet"
 
 
+def _is_geojson_file(input_file):
+    """Check if input file is GeoJSON format."""
+    # Handle URLs by extracting path before query params
+    path = input_file.split("?")[0]
+    ext = os.path.splitext(path)[1].lower()
+    return ext in [".geojson", ".json"]
+
+
 # Default max line size for CSV reading: 50MB
 # DuckDB defaults to 2MB, but geospatial CSVs often contain WKT geometries
 # with complex polygons (coastlines, admin boundaries) that exceed this.
@@ -981,11 +989,16 @@ def read_spatial_to_arrow(
             # Spatial files - detect CRS
             crs_from_file = detect_crs_from_spatial_file(input_url, con, verbose=verbose)
             if crs_from_file is None:
-                raise click.ClickException(
-                    f"No CRS found in input file: {input_file}\n"
-                    f"Spatial files (GeoPackage, Shapefile, GeoJSON, etc.) must have a defined CRS."
-                )
-            if not is_default_crs(crs_from_file):
+                if _is_geojson_file(input_file):
+                    # RFC 7946: GeoJSON is always WGS84/EPSG:4326
+                    if verbose:
+                        debug("GeoJSON file with no detected CRS, assuming WGS84 per RFC 7946")
+                else:
+                    raise click.ClickException(
+                        f"No CRS found in input file: {input_file}\n"
+                        f"Spatial files (GeoPackage, Shapefile, GeoJSON, etc.) must have a defined CRS."
+                    )
+            if crs_from_file is not None and not is_default_crs(crs_from_file):
                 detected_crs = crs_from_file
                 if verbose:
                     debug(f"Detected input CRS: {_format_crs_display(detected_crs)}")
@@ -1160,6 +1173,11 @@ def _determine_effective_crs(
     # Spatial files (GPKG, GeoJSON, Shapefile) - CRS must be present
     detected = detect_crs_from_spatial_file(input_url, con, verbose=verbose)
     if detected is None:
+        if _is_geojson_file(input_file):
+            # RFC 7946: GeoJSON is always WGS84/EPSG:4326
+            if verbose:
+                debug("GeoJSON file with no detected CRS, assuming WGS84 per RFC 7946")
+            return None
         raise click.ClickException(
             f"No CRS found in input file: {input_file}\n"
             f"Spatial files (GeoPackage, Shapefile, GeoJSON, etc.) must have a defined CRS."
