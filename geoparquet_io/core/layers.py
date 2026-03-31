@@ -279,7 +279,13 @@ def _list_filegdb_layers_fallback(path: str, con) -> list[str]:
             continue
 
     if not layers and errors:
-        debug(f"Fallback encountered errors: {errors[:3]}...")
+        # All .gdbtable reads failed - this indicates corruption, not empty GDB
+        error_summary = "; ".join(errors[:3])
+        if len(errors) > 3:
+            error_summary += f" (and {len(errors) - 3} more)"
+        raise RuntimeError(
+            f"Failed to read any layers from FileGDB: {path}. Errors: {error_summary}"
+        )
 
     return sorted(set(layers))
 

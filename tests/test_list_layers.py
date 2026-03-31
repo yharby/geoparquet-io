@@ -7,6 +7,7 @@ enumerated correctly, and that single-layer formats return None.
 
 import os
 import sqlite3
+import sys
 
 import pytest
 from click.testing import CliRunner
@@ -390,6 +391,10 @@ class TestListLayersEdgeCases:
         result = list_layers_core(relative_path)
         assert result is not None
 
+    @pytest.mark.skipif(
+        sys.platform.startswith("win"),
+        reason="Symlinks require admin/Developer Mode on Windows",
+    )
     def test_symlink_to_geopackage(self, tmp_path, multilayer_gpkg):
         """Symlinks to GeoPackage files should work."""
         symlink = tmp_path / "link.gpkg"
