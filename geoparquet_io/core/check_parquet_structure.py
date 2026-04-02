@@ -256,6 +256,10 @@ def check_row_groups(
             progress("- Optimal size: 64-256 MB per row group")
             progress("- Optimal rows: 10,000-200,000 rows per group")
             progress("- Small files (<64 MB): single row group is fine")
+            progress(
+                "- Spatial queries: 10,000-50,000 rows per group with Hilbert sorting "
+                "and GeoParquet v2.0 enables optimal row group skipping"
+            )
 
     if return_results:
         return results

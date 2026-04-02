@@ -206,6 +206,17 @@ def hilbert_order(
             "Consider using --geoparquet-version 2.0 to enable native geo_bbox row group statistics."
         )
 
+    if (
+        row_group_rows
+        and row_group_rows > 50000
+        and effective_version in ("2.0", "parquet-geo-only")
+    ):
+        info(
+            "For optimal spatial filter pushdown with Hilbert sorting, consider using "
+            "--row-group-size between 10,000 and 50,000. Smaller row groups create tighter "
+            "bounding boxes that enable more row group skipping."
+        )
+
     # Check for streaming mode (stdin input or stdout output)
     is_streaming = is_stdin(input_parquet) or should_stream_output(output_parquet)
 
