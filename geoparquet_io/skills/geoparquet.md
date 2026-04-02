@@ -72,7 +72,7 @@ gpio check spec <file>
 gpio check stac <file>
 
 # Auto-fix issues
-gpio check all <file> --fix --output <fixed_file>
+gpio check all <file> --fix --fix-output <fixed_file>
 ```
 <!-- END GENERATED: check-commands -->
 
@@ -191,7 +191,7 @@ Most write commands accept these options:
 
 | Option | Values | Default |
 |--------|--------|---------|
-| `--compression` | zstd, snappy, gzip, lz4, brotli, none | zstd |
+| `--compression` | zstd, snappy, gzip, lz4, brotli, uncompressed | zstd |
 | `--compression-level` | 1-22 (for zstd) | 15 |
 | `--row-group-size` | Number of rows per group | varies by command |
 <!-- END GENERATED: compression-options -->

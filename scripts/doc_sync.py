@@ -220,7 +220,7 @@ def generate_compression_options() -> str:
         "",
         "| Option | Values | Default |",
         "|--------|--------|---------|",
-        f"| `--compression` | zstd, snappy, gzip, lz4, brotli, none | {compression} |",
+        f"| `--compression` | zstd, snappy, gzip, lz4, brotli, uncompressed | {compression} |",
         f"| `--compression-level` | 1-22 (for zstd) | {compression_level} |",
         "| `--row-group-size` | Number of rows per group | varies by command |",
         "<!-- END GENERATED: compression-options -->",
@@ -281,7 +281,7 @@ def generate_check_commands() -> str:
         [
             "",
             "# Auto-fix issues",
-            "gpio check all <file> --fix --output <fixed_file>",
+            "gpio check all <file> --fix --fix-output <fixed_file>",
             "```",
             "<!-- END GENERATED: check-commands -->",
         ]

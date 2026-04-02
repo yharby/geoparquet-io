@@ -94,8 +94,8 @@
     {
       "code_file": "scripts/doc_sync.py",
       "doc_target": "CLAUDE.md",
-      "reviewed_at": "2026-04-02T15:22:32.486369+00:00",
-      "code_commit_at_review": "071b5e8",
+      "reviewed_at": "2026-04-02T16:35:33.811218+00:00",
+      "code_commit_at_review": "3051d19",
       "reviewed_by": "Claude"
     }
   ]
