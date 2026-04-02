@@ -117,7 +117,6 @@ docs = ["docs/guide/add.md"]
 code = "scripts/validate_claude_md.py"
 docs = ["CLAUDE.md"]
 
-# Link to doc_sync.py will be added after initial commit
-# [[link]]
-# code = "scripts/doc_sync.py"
-# docs = ["CLAUDE.md", ".claude/SKILL.md"]
+[[link]]
+code = "scripts/doc_sync.py"
+docs = ["CLAUDE.md", ".claude/SKILL.md"]
