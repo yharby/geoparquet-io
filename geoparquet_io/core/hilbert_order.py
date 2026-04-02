@@ -9,6 +9,7 @@ import duckdb
 import pyarrow as pa
 
 from geoparquet_io.core.common import (
+    DEFAULT_GEOPARQUET_VERSION,
     add_bbox,
     find_primary_geometry_column,
     get_bbox_advice,
@@ -198,6 +199,13 @@ def hilbert_order(
         profile: AWS profile name (S3 only, optional)
         geoparquet_version: GeoParquet version to write (1.0, 1.1, 2.0, parquet-geo-only)
     """
+    effective_version = geoparquet_version or DEFAULT_GEOPARQUET_VERSION
+    if effective_version == "1.1":
+        warn(
+            "Hilbert sorting to GeoParquet v1.1 provides no spatial filter pushdown benefit. "
+            "Consider using --geoparquet-version 2.0 to enable native geo_bbox row group statistics."
+        )
+
     # Check for streaming mode (stdin input or stdout output)
     is_streaming = is_stdin(input_parquet) or should_stream_output(output_parquet)
 
