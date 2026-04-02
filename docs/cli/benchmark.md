@@ -102,7 +102,17 @@ Runs a configurable suite of gpio operations (convert, add, sort, partition) on 
 View and compare benchmark results from previous runs.
 
 ```bash
-gpio benchmark report [OPTIONS]
+gpio benchmark report [OPTIONS] [RESULT_FILES]...
+```
+
+### Examples
+
+```bash
+# View single result file
+gpio benchmark report results.json
+
+# Compare multiple runs
+gpio benchmark report results/*.json
 ```
 
 ## Interpreting Results
