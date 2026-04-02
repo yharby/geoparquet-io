@@ -67,6 +67,43 @@ geoparquet_io/
 | `gpio sort` | column, hilbert, quadkey | Commands for sorting GeoParquet files |
 <!-- END GENERATED: cli-commands -->
 
+<!-- BEGIN GENERATED: core-modules -->
+### Core Modules
+
+| Module | Purpose | Lines |
+|--------|---------|-------|
+| `common.py` |  | 4036 |
+| `validate.py` | GeoParquet file validation against specification r... | 2854 |
+| `inspect_utils.py` | Utilities for inspecting GeoParquet files. | 1548 |
+| `convert.py` |  | 1395 |
+| `duckdb_metadata.py` | DuckDB-based Parquet metadata extraction. | 1277 |
+| `arcgis.py` | ArcGIS Feature Service to GeoParquet conversion. | 1226 |
+| `extract.py` | Extract columns and rows from GeoParquet files. | 1225 |
+| `metadata_utils.py` | Utilities for extracting and formatting GeoParquet... | 1197 |
+| `wfs.py` | WFS (Web Feature Service) to GeoParquet conversion... | 1193 |
+| `extract_bigquery.py` |  | 934 |
+| `partition_common.py` |  | 908 |
+| `admin_datasets.py` |  | 735 |
+| `benchmark.py` | Benchmark utilities for comparing GeoParquet conve... | 701 |
+| `partition_admin_hierarchical.py` |  | 698 |
+| `upload.py` | Upload GeoParquet files to cloud object storage. | 675 |
+| ... | *38 more modules* | |
+<!-- END GENERATED: core-modules -->
+
+<!-- freshness: last-verified: 2026-03-20, maps-to: geoparquet_io/core/common.py, geoparquet_io/cli/decorators.py -->
+### Key Patterns
+
+1. **CLI/Core Separation**: CLI commands are thin wrappers; business logic in `core/`
+2. **Common Utilities**: Always check `core/common.py` before writing new utilities
+3. **Shared Decorators**: Use existing decorators from `cli/decorators.py`
+4. **Error Handling**: Use `ClickException` for user-facing errors
+
+### Critical Rules
+
+- **Never use `click.echo()` in `core/` modules** - Use logging helpers instead
+- **Every CLI command needs a Python API** - Add to `api/table.py` (methods) and `api/ops.py` (functions)
+- **All documentation needs CLI + Python examples** - Use tabbed format
+
 ---
 
 <!-- freshness: last-verified: 2026-03-20, maps-to: geoparquet_io/core/common.py -->
