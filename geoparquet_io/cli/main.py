@@ -5540,33 +5540,36 @@ def skills(show: bool, copy_to: str | None, name: str):
     """
     from geoparquet_io.skills import get_skill_content, get_skill_path, list_skills
 
-    if show:
-        # Print content to stdout
-        click.echo(get_skill_content(name))
-    elif copy_to:
-        # Copy skill to directory
-        from pathlib import Path
-        from shutil import copy2
+    try:
+        if show:
+            # Print content to stdout
+            click.echo(get_skill_content(name))
+        elif copy_to:
+            # Copy skill to directory
+            from pathlib import Path
+            from shutil import copy2
 
-        dest_dir = Path(copy_to)
-        if not dest_dir.is_dir():
-            raise click.ClickException(f"Not a directory: {copy_to}")
+            dest_dir = Path(copy_to)
+            if not dest_dir.is_dir():
+                raise click.ClickException(f"Not a directory: {copy_to}")
 
-        src = get_skill_path(name)
-        dest = dest_dir / f"{name}.md"
-        copy2(src, dest)
-        click.echo(f"Copied skill to: {dest}")
-    else:
-        # List available skills
-        available = list_skills()
-        click.echo("Available gpio skills:\n")
-        for skill_name in available:
-            skill_path = get_skill_path(skill_name)
-            click.echo(f"  {skill_name}")
-            click.echo(f"    Path: {skill_path}")
-        click.echo("\nUsage:")
-        click.echo("  gpio skills --show       # Print to stdout")
-        click.echo("  gpio skills --copy .     # Copy to current directory")
+            src = get_skill_path(name)
+            dest = dest_dir / f"{name}.md"
+            copy2(src, dest)
+            click.echo(f"Copied skill to: {dest}")
+        else:
+            # List available skills
+            available = list_skills()
+            click.echo("Available gpio skills:\n")
+            for skill_name in available:
+                skill_path = get_skill_path(skill_name)
+                click.echo(f"  {skill_name}")
+                click.echo(f"    Path: {skill_path}")
+            click.echo("\nUsage:")
+            click.echo("  gpio skills --show       # Print to stdout")
+            click.echo("  gpio skills --copy .     # Copy to current directory")
+    except FileNotFoundError as e:
+        raise click.ClickException(str(e)) from e
 
 
 # Benchmark commands group

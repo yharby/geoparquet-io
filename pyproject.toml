@@ -78,7 +78,7 @@ dev = [
     "import-linter>=2.0",
     "bandit>=1.7",
     "pip-audit>=2.7",
-    "menard[brevity] @ git+https://github.com/nlebovits/menard.git@ea83d9f",
+    "menard @ git+https://github.com/nlebovits/menard.git",
     "deptry>=0.25.0",
 ]
 docs = [
@@ -97,6 +97,8 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["geoparquet_io"]
+# Include markdown skill files in wheel
+artifacts = ["geoparquet_io/skills/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

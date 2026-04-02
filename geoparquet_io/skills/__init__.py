@@ -28,10 +28,22 @@ def get_skill_path(name: str = "geoparquet") -> Path:
     Raises:
         FileNotFoundError: If skill doesn't exist.
     """
-    skill_file = files(__package__) / f"{name}.md"
-    if not skill_file.is_file():
-        raise FileNotFoundError(f"Skill '{name}' not found")
-    return Path(str(skill_file))
+    filename = f"{name}.md"
+
+    # Try importlib.resources first (works for installed packages)
+    try:
+        skill_file = files(__package__) / filename
+        if skill_file.is_file():
+            return Path(str(skill_file))
+    except (TypeError, AttributeError):
+        pass
+
+    # Fallback for development (running from source)
+    fallback = Path(__file__).parent / filename
+    if fallback.is_file():
+        return fallback
+
+    raise FileNotFoundError(f"Skill '{name}' not found")
 
 
 def get_skill_content(name: str = "geoparquet") -> str:
@@ -53,9 +65,17 @@ def list_skills() -> list[str]:
     Returns:
         List of skill names (without .md extension).
     """
-    skills_dir = files(__package__)
-    return [
-        p.name[:-3]  # Remove .md extension
-        for p in skills_dir.iterdir()
-        if p.name.endswith(".md")
-    ]
+    # Try importlib.resources first (works for installed packages)
+    try:
+        skills_dir = files(__package__)
+        return sorted(
+            p.name[:-3]  # Remove .md extension
+            for p in skills_dir.iterdir()
+            if p.name.endswith(".md")
+        )
+    except (TypeError, AttributeError):
+        pass
+
+    # Fallback for development (running from source)
+    fallback_dir = Path(__file__).parent
+    return sorted(p.stem for p in fallback_dir.glob("*.md"))
