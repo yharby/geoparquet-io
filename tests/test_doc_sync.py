@@ -177,105 +177,6 @@ class TestMarkerGeneration:
         assert "@pytest.mark." in section
 
 
-class TestDocstringExtraction:
-    """Unit tests for module docstring extraction."""
-
-    @pytest.fixture(autouse=True)
-    def _import_module(self):
-        """Import the generation module for unit tests."""
-        self.mod = _load_module()
-
-    def test_single_line_docstring(self):
-        """Test extraction from single-line docstrings."""
-        assert self.mod._extract_module_docstring('"""Hello world."""\n') == "Hello world."
-
-    def test_multi_line_docstring_newline_after_quotes(self):
-        """Test extraction from multi-line docstrings where first line is empty."""
-        content = '"""\nGeoParquet file validation.\n\nMore details.\n"""\n'
-        assert self.mod._extract_module_docstring(content) == "GeoParquet file validation."
-
-    def test_no_docstring(self):
-        """Test extraction returns empty string when no docstring."""
-        assert self.mod._extract_module_docstring("import os\n") == ""
-
-    def test_empty_docstring(self):
-        """Test extraction returns empty string for empty docstring."""
-        assert self.mod._extract_module_docstring('""""""') == ""
-
-    def test_real_modules_have_purposes(self):
-        """Test that modules with docstrings actually get their purpose extracted."""
-        modules = self.mod.get_core_modules(PROJECT_ROOT / "geoparquet_io" / "core")
-        with_purpose = [m for m in modules if m["purpose"]]
-        # After fixing docstring extraction, we should have significantly more
-        # than the original 6 modules with purposes
-        assert len(with_purpose) >= 10, (
-            f"Only {len(with_purpose)} modules have purposes extracted. "
-            f"Expected at least 10. Docstring extraction may be broken."
-        )
-
-
-class TestModuleGeneration:
-    """Unit tests for core module generation."""
-
-    @pytest.fixture(autouse=True)
-    def _import_module(self):
-        """Import the generation module for unit tests."""
-        self.mod = _load_module()
-
-    def test_get_core_modules_returns_list(self):
-        """Test core module scanning returns a list."""
-        modules = self.mod.get_core_modules(PROJECT_ROOT / "geoparquet_io" / "core")
-        assert isinstance(modules, list)
-        assert len(modules) > 0
-
-    def test_get_core_modules_includes_common(self):
-        """Test that common.py is found."""
-        modules = self.mod.get_core_modules(PROJECT_ROOT / "geoparquet_io" / "core")
-        module_names = [m["name"] for m in modules]
-        assert "common.py" in module_names
-
-    def test_get_core_modules_skips_init(self):
-        """Test that __init__.py is excluded."""
-        modules = self.mod.get_core_modules(PROJECT_ROOT / "geoparquet_io" / "core")
-        module_names = [m["name"] for m in modules]
-        assert "__init__.py" not in module_names
-
-    def test_get_core_modules_has_line_counts(self):
-        """Test that modules have line counts."""
-        modules = self.mod.get_core_modules(PROJECT_ROOT / "geoparquet_io" / "core")
-        for mod in modules:
-            assert "lines" in mod
-            assert mod["lines"] > 0
-
-    def test_generate_modules_section_format(self):
-        """Test modules section has correct markdown format."""
-        section = self.mod.generate_modules_section(PROJECT_ROOT / "geoparquet_io" / "core")
-        assert "<!-- BEGIN GENERATED: core-modules -->" in section
-        assert "<!-- END GENERATED: core-modules -->" in section
-        assert "| Module |" in section
-        assert "| Purpose |" in section
-        assert "| Lines |" in section
-
-    def test_generate_modules_section_limits_to_15(self):
-        """Test that only top 15 modules are shown."""
-        section = self.mod.generate_modules_section(PROJECT_ROOT / "geoparquet_io" / "core")
-        # Count table rows (lines starting with | and not header/separator)
-        table_rows = [
-            line
-            for line in section.split("\n")
-            if line.startswith("|")
-            and "Module" not in line
-            and "---" not in line
-            and "more modules" not in line
-        ]
-        assert len(table_rows) == 15
-
-    def test_generate_modules_section_has_more_line(self):
-        """Test that the '... more modules' line is present."""
-        section = self.mod.generate_modules_section(PROJECT_ROOT / "geoparquet_io" / "core")
-        assert "more modules" in section
-
-
 class TestSectionUpdate:
     """Unit tests for section replacement logic."""
 
@@ -345,7 +246,7 @@ class TestUpdateMode:
         """Test that CLAUDE.md contains the generated section markers."""
         claude_md = PROJECT_ROOT / "CLAUDE.md"
         content = claude_md.read_text(encoding="utf-8")
-        for section_name in ["cli-commands", "test-markers", "core-modules"]:
+        for section_name in ["cli-commands", "test-markers"]:
             assert f"<!-- BEGIN GENERATED: {section_name} -->" in content, (
                 f"CLAUDE.md missing BEGIN marker for '{section_name}'"
             )
@@ -362,9 +263,6 @@ class TestUpdateMode:
         sections = {
             "cli-commands": self.mod.generate_cli_section(),
             "test-markers": self.mod.generate_markers_section(PROJECT_ROOT / "pyproject.toml"),
-            "core-modules": self.mod.generate_modules_section(
-                PROJECT_ROOT / "geoparquet_io" / "core"
-            ),
         }
 
         updated = content
@@ -373,7 +271,7 @@ class TestUpdateMode:
 
         # Should still have the main title
         assert "# Claude Code Instructions for geoparquet-io" in updated
-        # Should have all three generated sections
+        # Should have both generated sections
         for name in sections:
             assert f"<!-- BEGIN GENERATED: {name} -->" in updated
             assert f"<!-- END GENERATED: {name} -->" in updated
@@ -386,9 +284,6 @@ class TestUpdateMode:
         sections = {
             "cli-commands": self.mod.generate_cli_section(),
             "test-markers": self.mod.generate_markers_section(PROJECT_ROOT / "pyproject.toml"),
-            "core-modules": self.mod.generate_modules_section(
-                PROJECT_ROOT / "geoparquet_io" / "core"
-            ),
         }
 
         # First pass
@@ -400,9 +295,6 @@ class TestUpdateMode:
         sections2 = {
             "cli-commands": self.mod.generate_cli_section(),
             "test-markers": self.mod.generate_markers_section(PROJECT_ROOT / "pyproject.toml"),
-            "core-modules": self.mod.generate_modules_section(
-                PROJECT_ROOT / "geoparquet_io" / "core"
-            ),
         }
 
         second_pass = first_pass
