@@ -41,6 +41,55 @@
       "reviewed_at": "2026-04-02T14:59:35.690765+00:00",
       "code_commit_at_review": "d71867c",
       "reviewed_by": "Claude"
+    },
+    {
+      "code_file": "geoparquet_io/cli/main.py",
+      "doc_target": "CLAUDE.md#CLI Command Groups",
+      "reviewed_at": "2026-04-02T15:00:50.711976+00:00",
+      "code_commit_at_review": "d71867c",
+      "reviewed_by": "Claude"
+    },
+    {
+      "code_file": "geoparquet_io/cli/main.py",
+      "doc_target": "CLAUDE.md#Architecture & Key Files",
+      "reviewed_at": "2026-04-02T15:00:50.816535+00:00",
+      "code_commit_at_review": "d71867c",
+      "reviewed_by": "Claude"
+    },
+    {
+      "code_file": "geoparquet_io/cli/main.py",
+      "doc_target": "geoparquet_io/skills/geoparquet.md#Available Commands",
+      "reviewed_at": "2026-04-02T15:00:50.925514+00:00",
+      "code_commit_at_review": "d71867c",
+      "reviewed_by": "Claude"
+    },
+    {
+      "code_file": "scripts/doc_sync.py",
+      "doc_target": "geoparquet_io/skills/geoparquet.md",
+      "reviewed_at": "2026-04-02T15:00:51.030232+00:00",
+      "code_commit_at_review": "d71867c",
+      "reviewed_by": "Claude"
+    },
+    {
+      "code_file": "geoparquet_io/api/table.py",
+      "doc_target": "docs/api/python-api.md#Table Class",
+      "reviewed_at": "2026-04-02T15:00:51.133038+00:00",
+      "code_commit_at_review": "b1f6644",
+      "reviewed_by": "Claude"
+    },
+    {
+      "code_file": "geoparquet_io/api/ops.py",
+      "doc_target": "docs/api/python-api.md#Standalone Functions",
+      "reviewed_at": "2026-04-02T15:00:51.241972+00:00",
+      "code_commit_at_review": "440eb46",
+      "reviewed_by": "Claude"
+    },
+    {
+      "code_file": "geoparquet_io/cli/decorators.py",
+      "doc_target": "CLAUDE.md#Key Patterns",
+      "reviewed_at": "2026-04-02T15:00:51.351185+00:00",
+      "code_commit_at_review": "f454dfe",
+      "reviewed_by": "Claude"
     }
   ]
 }
