@@ -1,18 +1,26 @@
 # benchmark Command
 
-Benchmark GeoParquet conversion performance across different methods.
+Benchmark GeoParquet conversion and operation performance.
 
-## Quick Reference
+## Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `compare` | Compare converter performance on a single file |
+| `suite` | Run comprehensive benchmark suite |
+| `report` | View and compare benchmark results |
+
+## gpio benchmark compare
+
+Compare converter performance on a single file.
+
+### Quick Reference
 
 ```bash
-gpio benchmark INPUT_FILE [OPTIONS]
+gpio benchmark compare INPUT_FILE [OPTIONS]
 ```
 
-## Description
-
-Tests available conversion methods (DuckDB, GeoPandas with Fiona/PyOGRIO, GDAL ogr2ogr) on an input geospatial file and reports time and memory usage.
-
-## Available Converters
+### Available Converters
 
 | Converter | Description | Install |
 |-----------|-------------|---------|
@@ -28,7 +36,7 @@ uv pip install geoparquet-io[benchmark]
 # or: pip install geoparquet-io[benchmark]
 ```
 
-## Options
+### Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -40,39 +48,25 @@ uv pip install geoparquet-io[benchmark]
 | `--format table\|json` | table | Output format |
 | `--quiet` | - | Suppress progress output |
 
-## Examples
-
-### Basic Benchmark
+### Examples
 
 ```bash
-gpio benchmark input.geojson
+# Basic comparison
+gpio benchmark compare input.geojson
+
+# Specific converters with more iterations
+gpio benchmark compare input.shp --converters duckdb,geopandas_pyogrio --iterations 5
+
+# Save results and keep output files
+gpio benchmark compare input.gpkg --output-json results.json --keep-output ./output
+
+# JSON output
+gpio benchmark compare input.geojson --format json
 ```
 
-Runs all available converters with 3 iterations each.
+### Output
 
-### Specific Converters
-
-```bash
-gpio benchmark input.shp --converters duckdb,geopandas_pyogrio --iterations 5
-```
-
-### Save Results
-
-```bash
-gpio benchmark input.gpkg --output-json results.json --keep-output ./output
-```
-
-Saves JSON results and keeps the converted Parquet files.
-
-### JSON Output
-
-```bash
-gpio benchmark input.geojson --format json
-```
-
-## Output
-
-### Table Format (default)
+#### Table Format (default)
 
 ```
 ======================================================================
@@ -93,9 +87,23 @@ GeoPandas (PyOGRIO)       59.957 +/- 1.078   1196.7 +/- 0.0
 Fastest: DuckDB (29.751s)
 ```
 
-### JSON Format
+## gpio benchmark suite
 
-Includes environment info, file metadata, raw results per iteration, and aggregated statistics.
+Run comprehensive benchmark suite across multiple operations.
+
+```bash
+gpio benchmark suite [OPTIONS]
+```
+
+Runs a configurable suite of gpio operations (convert, add, sort, partition) on test files and generates detailed reports.
+
+## gpio benchmark report
+
+View and compare benchmark results from previous runs.
+
+```bash
+gpio benchmark report [OPTIONS]
+```
 
 ## Interpreting Results
 

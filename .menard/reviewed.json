@@ -13,6 +13,34 @@
       "reviewed_at": "2026-04-02T13:43:58.935718+00:00",
       "code_commit_at_review": "3f64ba3",
       "reviewed_by": "user"
+    },
+    {
+      "code_file": "geoparquet_io/core/stac.py",
+      "doc_target": "docs/guide/stac.md",
+      "reviewed_at": "2026-04-02T14:58:46.295840+00:00",
+      "code_commit_at_review": "f12d2f8",
+      "reviewed_by": "Claude"
+    },
+    {
+      "code_file": "geoparquet_io/core/convert.py",
+      "doc_target": "docs/guide/convert.md",
+      "reviewed_at": "2026-04-02T14:58:46.661608+00:00",
+      "code_commit_at_review": "bbfd1d5",
+      "reviewed_by": "Claude"
+    },
+    {
+      "code_file": "geoparquet_io/core/benchmark.py",
+      "doc_target": "docs/cli/benchmark.md",
+      "reviewed_at": "2026-04-02T14:59:15.848217+00:00",
+      "code_commit_at_review": "5b2c5d1",
+      "reviewed_by": "Claude"
+    },
+    {
+      "code_file": "geoparquet_io/cli/main.py",
+      "doc_target": "docs/contributing.md",
+      "reviewed_at": "2026-04-02T14:59:35.690765+00:00",
+      "code_commit_at_review": "d71867c",
+      "reviewed_by": "Claude"
     }
   ]
 }
