@@ -108,7 +108,9 @@ def generate_cli_section() -> str:
     for name, info in sorted(commands.items()):
         subcommands = ", ".join(info["subcommands"]) if info["subcommands"] else ""
         help_text = info["help"].strip()
-        desc = help_text.split(".")[0].strip() if help_text else ""
+        # Normalize whitespace before extracting first sentence
+        normalized_help = re.sub(r"\s+", " ", help_text).strip()
+        desc = normalized_help.split(".", 1)[0].strip() if normalized_help else ""
         lines.append(f"| `gpio {name}` | {subcommands} | {desc} |")
 
     lines.append("<!-- END GENERATED: cli-commands -->")
@@ -154,11 +156,15 @@ def generate_markers_section(pyproject_path: Path) -> str:
 
 
 def truncate_text(text: str, max_len: int = 60) -> str:
-    """Truncate text at word boundary."""
-    if len(text) <= max_len:
-        return text
+    """Truncate text at word boundary, normalizing whitespace first."""
+    # Normalize: collapse all whitespace (including newlines) to single spaces
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if len(normalized) <= max_len:
+        return normalized
     # Find last space before max_len
-    truncated = text[:max_len].rsplit(" ", 1)[0]
+    truncated = normalized[:max_len].rsplit(" ", 1)[0]
+    if not truncated:  # No space found, hard cut
+        truncated = normalized[: max_len - 3]
     return truncated + "..."
 
 
@@ -348,7 +354,7 @@ def sync_skill_md(project_root: Path, update: bool, check: bool) -> tuple[bool, 
     skill_md = project_root / "geoparquet_io" / "skills" / "geoparquet.md"
 
     if not skill_md.exists():
-        return False, ["ERROR: .claude/skill (geoparquet.md) not found"]
+        return False, [f"ERROR: {skill_md} not found"]
 
     original = skill_md.read_text(encoding="utf-8")
     updated = original

@@ -81,6 +81,14 @@ repos:
         files: ^(CLAUDE\.md|geoparquet_io/cli/main\.py|pyproject\.toml)$
         pass_filenames: false
 
+      - id: doc-sync
+        name: doc-sync
+        description: Auto-update generated CLAUDE.md and SKILL.md sections
+        entry: uv run python scripts/doc_sync.py --update
+        language: system
+        files: ^(geoparquet_io/cli/main\.py|geoparquet_io/cli/decorators\.py|pyproject\.toml|geoparquet_io/core/.*\.py|scripts/doc_sync\.py)$
+        pass_filenames: false
+
       - id: menard-check
         name: menard-check
         description: Check if documentation is stale relative to code changes
@@ -88,14 +96,6 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-
-      - id: doc-sync
-        name: doc-sync
-        description: Auto-update generated CLAUDE.md and SKILL.md sections
-        entry: uv run python scripts/doc_sync.py --update
-        language: system
-        files: ^(geoparquet_io/cli/main\.py|geoparquet_io/cli/decorators\.py|pyproject\.toml|geoparquet_io/core/.*\.py)$
-        pass_filenames: false
 
       - id: sync-dependencies
         name: sync-dependencies

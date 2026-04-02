@@ -90,6 +90,13 @@
       "reviewed_at": "2026-04-02T15:00:51.351185+00:00",
       "code_commit_at_review": "f454dfe",
       "reviewed_by": "Claude"
+    },
+    {
+      "code_file": "scripts/doc_sync.py",
+      "doc_target": "CLAUDE.md",
+      "reviewed_at": "2026-04-02T15:22:32.486369+00:00",
+      "code_commit_at_review": "071b5e8",
+      "reviewed_by": "Claude"
     }
   ]
 }

@@ -68,7 +68,12 @@ docs = ["CLAUDE.md#DuckDB 1.5 Patterns (MUST follow)"]
 # Skill mappings (packaged with gpio for LLM integration)
 [[link]]
 code = "geoparquet_io/cli/main.py"
-docs = ["geoparquet_io/skills/geoparquet.md#Available Commands"]
+docs = ["geoparquet_io/skills/geoparquet.md#Command Reference"]
+
+# LLM integration guide
+[[link]]
+code = "geoparquet_io/skills/__init__.py"
+docs = ["docs/guide/llm-integration.md"]
 
 # API documentation (high-value, frequently used)
 [[link]]
