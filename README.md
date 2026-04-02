@@ -113,9 +113,9 @@ pipx inject geoparquet-io gpio-pmtiles
 
 Use gpio with [Claude Code](https://claude.ai/code) for AI-assisted spatial data workflows.
 
-Install the skill from `skills/geoparquet/` or download it from:
+The skill is located at `.claude/SKILL.md` or download it from:
 ```
-https://github.com/geoparquet/geoparquet-io/tree/main/skills/geoparquet
+https://github.com/geoparquet/geoparquet-io/blob/main/.claude/SKILL.md
 ```
 
 The skill teaches Claude how to help you convert spatial data to optimized GeoParquet, validate files, recommend partitioning strategies, and publish to cloud storage.

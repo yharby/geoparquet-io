@@ -78,6 +78,7 @@ dev = [
     "import-linter>=2.0",
     "bandit>=1.7",
     "pip-audit>=2.7",
+    "menard[brevity] @ git+https://github.com/nlebovits/menard.git",
 ]
 docs = [
     "mkdocs>=1.5.0",
@@ -89,6 +90,9 @@ benchmark = [
     "pyogrio>=0.7.0",
     "fiona>=1.9.0",
 ]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["geoparquet_io"]
@@ -307,3 +311,11 @@ dev = [
     "pytest>=9.0.1",
     "pytest-cov>=7.0.0",
 ]
+
+[tool.menard]
+mode = "block"
+transitive_depth = 1
+enforce_symmetry = true
+require_links = ["geoparquet_io/**/*.py"]
+exempt = ["tests/**"]
+doc_paths = ["docs/**/*.md", "README.md", "CLAUDE.md", ".claude/SKILL.md"]

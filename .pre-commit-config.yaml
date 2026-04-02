@@ -101,6 +101,14 @@ repos:
       files: ^(CLAUDE\.md|geoparquet_io/cli/main\.py|pyproject\.toml)$
       pass_filenames: false
 
+    - id: menard-check
+      name: menard-check
+      description: Check if documentation is stale relative to code changes
+      entry: uv run menard check
+      language: system
+      pass_filenames: false
+      always_run: true
+
     - id: check-commit-msg
       name: check-commit-msg
       description: Enforce imperative mood in commit messages (legacy - commitizen hook preferred)
@@ -167,6 +175,14 @@ repos:
       entry: uv run python scripts/generate_claude_md_sections.py --update
       language: system
       files: ^(geoparquet_io/cli/main\.py|pyproject\.toml|geoparquet_io/core/.*\.py)$
+      pass_filenames: false
+
+    - id: update-skill-md-sections
+      name: update-skill-md-sections
+      description: Auto-update generated SKILL.md sections from CLI
+      entry: uv run python scripts/generate_skill_commands.py --update
+      language: system
+      files: ^(geoparquet_io/cli/main\.py|geoparquet_io/cli/decorators\.py)$
       pass_filenames: false
 
     - id: sync-dependencies
