@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Sync generated documentation sections from code introspection.
 
-This script auto-generates documentation sections in CLAUDE.md and SKILL.md
+This script auto-generates documentation sections in CLAUDE.md and skill (geoparquet.md)
 to prevent drift between code and documentation.
 
 CLAUDE.md sections:
@@ -9,7 +9,7 @@ CLAUDE.md sections:
 - Test markers from pyproject.toml
 - Core modules index from filesystem
 
-SKILL.md sections:
+skill (geoparquet.md) sections:
 - Command reference table
 - Inspection commands
 - Check commands
@@ -20,7 +20,7 @@ Usage:
     python scripts/doc_sync.py --update     # Update all docs
     python scripts/doc_sync.py --check      # Exit 1 if outdated (CI mode)
     python scripts/doc_sync.py --claude     # Only CLAUDE.md
-    python scripts/doc_sync.py --skill      # Only SKILL.md
+    python scripts/doc_sync.py --skill      # Only skill (geoparquet.md)
 """
 
 from __future__ import annotations
@@ -208,7 +208,7 @@ def generate_modules_section(core_path: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# SKILL.md generators
+# skill (geoparquet.md) generators
 # ---------------------------------------------------------------------------
 
 
@@ -222,7 +222,7 @@ def truncate_text(text: str, max_len: int = 60) -> str:
 
 
 def generate_skill_commands_table() -> str:
-    """Generate the CLI commands table for SKILL.md."""
+    """Generate the CLI commands table for skill (geoparquet.md)."""
     commands = get_cli_commands()
 
     lines = [
@@ -296,8 +296,8 @@ def generate_inspection_commands() -> str:
         inspect_group = cli.commands["inspect"]
         if isinstance(inspect_group, click.Group):
             for subname, subcmd in sorted(inspect_group.commands.items()):
-                help_line = (subcmd.help or "").split("\n")[0].strip()
-                lines.append(f"gpio inspect {subname} <file>  # {help_line[:40]}")
+                help_line = (subcmd.help or "").split("\n")[0].strip()[:40].rstrip()
+                lines.append(f"gpio inspect {subname} <file>  # {help_line}")
 
     lines.extend(
         [
@@ -404,15 +404,15 @@ def sync_claude_md(project_root: Path, update: bool, check: bool) -> tuple[bool,
 
 
 def sync_skill_md(project_root: Path, update: bool, check: bool) -> tuple[bool, list[str]]:
-    """Sync SKILL.md generated sections.
+    """Sync skill generated sections.
 
     Returns:
         Tuple of (changed, messages).
     """
-    skill_md = project_root / ".claude" / "SKILL.md"
+    skill_md = project_root / "geoparquet_io" / "skills" / "geoparquet.md"
 
     if not skill_md.exists():
-        return False, ["ERROR: .claude/SKILL.md not found"]
+        return False, ["ERROR: .claude/skill (geoparquet.md) not found"]
 
     original = skill_md.read_text(encoding="utf-8")
     updated = original
@@ -428,12 +428,12 @@ def sync_skill_md(project_root: Path, update: bool, check: bool) -> tuple[bool, 
         updated = update_section(updated, name, content)
 
     if updated == original:
-        return False, ["SKILL.md: up to date"]
+        return False, ["skill (geoparquet.md): up to date"]
 
     messages = []
     for name in sections:
         if f"<!-- BEGIN GENERATED: {name} -->" not in original:
-            messages.append(f"SKILL.md: would ADD {name}")
+            messages.append(f"skill (geoparquet.md): would ADD {name}")
         else:
             pattern = (
                 rf"<!-- BEGIN GENERATED: {re.escape(name)} -->"
@@ -443,11 +443,11 @@ def sync_skill_md(project_root: Path, update: bool, check: bool) -> tuple[bool, 
             old_match = re.search(pattern, original, re.DOTALL)
             new_match = re.search(pattern, updated, re.DOTALL)
             if old_match and new_match and old_match.group() != new_match.group():
-                messages.append(f"SKILL.md: would UPDATE {name}")
+                messages.append(f"skill (geoparquet.md): would UPDATE {name}")
 
     if update:
         skill_md.write_text(updated, encoding="utf-8")
-        messages = ["SKILL.md: updated"]
+        messages = ["skill (geoparquet.md): updated"]
 
     return True, messages
 
@@ -463,7 +463,7 @@ def main() -> int:
 
     target = parser.add_mutually_exclusive_group()
     target.add_argument("--claude", action="store_true", help="Only sync CLAUDE.md")
-    target.add_argument("--skill", action="store_true", help="Only sync SKILL.md")
+    target.add_argument("--skill", action="store_true", help="Only sync skill (geoparquet.md)")
 
     args = parser.parse_args()
 
@@ -477,7 +477,7 @@ def main() -> int:
         any_changed = any_changed or changed
         all_messages.extend(messages)
 
-    # Sync SKILL.md
+    # Sync skill (geoparquet.md)
     if not args.claude:
         changed, messages = sync_skill_md(project_root, args.update, args.check)
         any_changed = any_changed or changed

@@ -109,16 +109,30 @@ pipx inject geoparquet-io gpio-pmtiles
 
 - **[gpio-pmtiles](https://github.com/geoparquet-io/gpio-pmtiles)** - Convert between GeoParquet and PMTiles format for efficient web map tiles
 
-## Claude Code Integration
+## LLM Integration
 
-Use gpio with [Claude Code](https://claude.ai/code) for AI-assisted spatial data workflows.
+gpio includes a skill file that teaches LLMs (ChatGPT, Claude, Gemini, etc.) how to work with spatial data using gpio.
 
-The skill is located at `.claude/SKILL.md` or download it from:
+```bash
+# List available skills
+gpio skills
+
+# Print skill content (pipe to clipboard or paste into chat)
+gpio skills --show
+
+# Copy skill to current directory for customization
+gpio skills --copy .
 ```
-https://github.com/geoparquet/geoparquet-io/blob/main/.claude/SKILL.md
-```
 
-The skill teaches Claude how to help you convert spatial data to optimized GeoParquet, validate files, recommend partitioning strategies, and publish to cloud storage.
+The skill teaches LLMs how to:
+- Convert spatial data to optimized GeoParquet
+- Validate files against best practices
+- Recommend partitioning strategies based on data size
+- Publish to cloud storage
+
+### Claude Code
+
+For [Claude Code](https://claude.ai/code) users, invoke the skill via `/geoparquet` or ask Claude to help with GeoParquet conversions.
 
 ## Contributing
 

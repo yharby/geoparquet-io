@@ -75,16 +75,15 @@ docs = ["CLAUDE.md#CLI Command Groups", "CLAUDE.md#Architecture & Key Files"]
 
 [[link]]
 code = "geoparquet_io/cli/decorators.py"
-docs = ["CLAUDE.md#Key Patterns", ".claude/SKILL.md#Compression Options"]
+docs = ["CLAUDE.md#Key Patterns", "geoparquet_io/skills/geoparquet.md#Compression Options"]
 
-[[link]]
-code = "pyproject.toml"
-docs = ["CLAUDE.md#Testing with uv", "CLAUDE.md#Test Markers"]
+# Note: pyproject.toml → CLAUDE.md#Testing with uv, CLAUDE.md#Test Markers
+# is handled by doc_sync.py (auto-generates these sections), not menard.
 
-# Skill.md mappings
+# Skill mappings (packaged with gpio for LLM integration)
 [[link]]
 code = "geoparquet_io/cli/main.py"
-docs = [".claude/SKILL.md#Available Commands"]
+docs = ["geoparquet_io/skills/geoparquet.md#Available Commands"]
 
 # API documentation (high-value, frequently used)
 [[link]]
@@ -119,4 +118,4 @@ docs = ["CLAUDE.md"]
 
 [[link]]
 code = "scripts/doc_sync.py"
-docs = ["CLAUDE.md", ".claude/SKILL.md"]
+docs = ["CLAUDE.md", "geoparquet_io/skills/geoparquet.md"]

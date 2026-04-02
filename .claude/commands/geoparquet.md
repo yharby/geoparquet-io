@@ -1,6 +1,6 @@
 # GeoParquet Assistant
 
-Read the skill from: `.claude/SKILL.md` and follow those instructions to help the user work with spatial data.
+Read the skill from: `geoparquet_io/skills/geoparquet.md` and follow those instructions to help the user work with spatial data.
 
 Your goal is to guide users through:
 1. **Ingesting** their data (download if URL, identify format)

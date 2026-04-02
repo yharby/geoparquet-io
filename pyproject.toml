@@ -327,4 +327,4 @@ transitive_depth = 1
 enforce_symmetry = true
 require_links = ["geoparquet_io/**/*.py"]
 exempt = ["tests/**"]
-doc_paths = ["docs/**/*.md", "README.md", "CLAUDE.md", ".claude/SKILL.md"]
+doc_paths = ["docs/**/*.md", "README.md", "CLAUDE.md", "geoparquet_io/skills/*.md"]

@@ -17,3 +17,14 @@ docs/index.md#Features <- README.md#Features
 # Badge images and shields (visual assets, not prose)
 README.md:badges
 docs/index.md:badges
+
+# Auto-generated sections (doc_sync.py keeps these current)
+# These are regenerated on every commit via pre-commit hook
+CLAUDE.md#Testing with uv
+CLAUDE.md#Test Markers
+CLAUDE.md#CLI Command Groups
+CLAUDE.md#Core Modules
+geoparquet_io/skills/geoparquet.md#Command Reference
+geoparquet_io/skills/geoparquet.md#Compression Options
+geoparquet_io/skills/geoparquet.md#Inspection Commands
+geoparquet_io/skills/geoparquet.md#Validation Commands
