@@ -80,6 +80,15 @@ docs = ["CLAUDE.md#Key Patterns", "geoparquet_io/skills/geoparquet.md#Compressio
 # Note: pyproject.toml → CLAUDE.md#Testing with uv, CLAUDE.md#Test Markers
 # is handled by doc_sync.py (auto-generates these sections), not menard.
 
+# DuckDB 1.5 patterns - critical safety documentation
+[[link]]
+code = "pyproject.toml"
+docs = ["CLAUDE.md#DuckDB 1.5 Patterns (MUST follow)"]
+
+[[link]]
+code = "geoparquet_io/core/common.py"
+docs = ["CLAUDE.md#DuckDB 1.5 Patterns (MUST follow)"]
+
 # Skill mappings (packaged with gpio for LLM integration)
 [[link]]
 code = "geoparquet_io/cli/main.py"

@@ -142,7 +142,23 @@ from geoparquet_io.core.logging_config import success, warn, error, info, debug,
 
 # Remote files
 from geoparquet_io.core.common import is_remote_url, remote_write_context, setup_aws_profile_if_needed
+
+# Paths — prefer pathlib over os.path
+from pathlib import Path
 ```
+
+### DuckDB 1.5 Patterns (MUST follow)
+
+| Old pattern (do NOT use) | Correct pattern |
+|--------------------------|-----------------|
+| `con.execute(q).fetch_arrow_table()` | `con.execute(q).arrow().read_all()` |
+| `con.execute(q).to_arrow_table()` | `con.execute(q).arrow().read_all()` |
+| `TRY_CAST(x AS GEOMETRY)` | `TRY(ST_GeomFromText(x))` |
+| `ST_Transform(geom, 'EPSG:4326', always_xy := true)` | `SET geometry_always_xy = true` at session level |
+| `apply_crs_to_parquet()` (removed) | `_wrap_query_with_crs()` — ST_SetCRS in SQL before COPY TO |
+| `SET bq_geography_as_geometry = true` | Not needed — GEOGRAPHY maps to GEOMETRY automatically |
+
+**Why**: `fetch_arrow_table()` crashes in DuckDB 1.5 with `TransactionContext::ActiveTransaction` on geometry columns from parquet. `TRY_CAST` is broken for GEOMETRY. These are hard crashes, not deprecations.
 
 ---
 
@@ -206,6 +222,8 @@ uv run xenon --max-absolute=A geoparquet_io/  # Aim for A grade
 - Use early returns (guard clauses)
 - Dictionary dispatch over long if-elif
 - Max 30-40 lines per function
+
+- Prefer `pathlib.Path` over `os.path` for new code; use `str(path)` when APIs require strings
 
 ---
 
