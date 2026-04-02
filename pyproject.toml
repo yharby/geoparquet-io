@@ -79,6 +79,7 @@ dev = [
     "bandit>=1.7",
     "pip-audit>=2.7",
     "menard[brevity] @ git+https://github.com/nlebovits/menard.git",
+    "deptry>=0.25.0",
 ]
 docs = [
     "mkdocs>=1.5.0",
@@ -311,6 +312,14 @@ dev = [
     "pytest>=9.0.1",
     "pytest-cov>=7.0.0",
 ]
+
+[tool.deptry]
+# DEP002: unused dependencies - skip because optional/benchmark extras aren't always used
+ignore = ["DEP002"]
+# Exclude virtual env, tests, and benchmarks from analysis
+exclude = [".venv", "tests", "geoparquet_io/benchmarks"]
+# Known transitive dependencies that appear unused but are required
+per_rule_ignores = {DEP003 = ["tomli"]}
 
 [tool.menard]
 mode = "block"

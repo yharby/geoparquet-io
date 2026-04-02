@@ -33,6 +33,16 @@ repos:
         additional_dependencies:
           - tomli
 
+  - repo: local
+    hooks:
+      - id: deptry
+        name: deptry
+        description: Check for dependency issues
+        entry: uv run deptry .
+        language: system
+        pass_filenames: false
+        always_run: true
+
     # find unused code
   - repo: https://github.com/jendrikseipp/vulture
     rev: 'v2.14'
