@@ -6,8 +6,8 @@ Thank you for your interest in contributing to geoparquet-io! This document prov
 
 ### Prerequisites
 
-- Python 3.9 or higher
-- [uv](https://docs.astral.sh/uv/) package manager (recommended) or pip
+- Python 3.10 or higher
+- [uv](https://docs.astral.sh/uv/) package manager
 
 ### Getting Started
 
@@ -36,20 +36,66 @@ Thank you for your interest in contributing to geoparquet-io! This document prov
 
 ## Development Workflow
 
-### Running Tests
+### Testing Your Changes
+
+#### For External Contributors
+
+!!! tip "You don't need all dev tools installed"
+    Some tests check that tooling is available (codespell, mypy, bandit, etc.). These
+    may fail locally if you don't have the full dev environment, but **that's OK**—they
+    run in CI and aren't testing your code. Focus on the tests relevant to your changes.
+
+#### Quick Test: Test Your PR Changes
+
+For most contributions, test only the code you modified:
 
 ```bash
-# Run all tests
+# Test specific file you changed
+uv run pytest tests/test_yourfile.py -v
+
+# Test with fast markers only (skips slow/network tests)
+uv run pytest tests/test_yourfile.py -v -m "not slow and not network"
+```
+
+#### Core Tests: Skip Tooling Checks
+
+Run core functional tests without tooling-availability checks:
+
+```bash
+uv run pytest -m "not slow and not network" \
+  --ignore=tests/test_codespell.py \
+  --ignore=tests/test_commitizen.py \
+  --ignore=tests/test_mypy.py \
+  --ignore=tests/test_mutmut.py \
+  --ignore=tests/test_security.py
+```
+
+#### Full Test Suite: Match CI
+
+To run the complete test suite as CI does (requires all extras installed):
+
+```bash
+# Install all dependencies including dev tools
+uv sync --all-extras
+
+# Run full suite
 uv run pytest
 
 # Run with coverage
 uv run pytest --cov=geoparquet_io --cov-report=term-missing
+```
 
+#### Common Test Commands
+
+```bash
 # Run specific test file
 uv run pytest tests/test_sort.py
 
-# Run specific test
+# Run specific test function
 uv run pytest tests/test_sort.py::test_hilbert_order
+
+# Run tests matching a keyword
+uv run pytest -k "hilbert"
 
 # Skip slow/network tests
 uv run pytest -m "not slow and not network"
@@ -161,9 +207,10 @@ Keep first line under 72 characters. Add details in body if needed.
    - Add/update tests
    - Update documentation
 
-3. **Ensure tests pass**
+3. **Ensure tests pass** (see [Testing Your Changes](#testing-your-changes))
    ```bash
-   uv run pytest
+   # At minimum, test your changes:
+   uv run pytest tests/test_yourfile.py -v
    ```
 
 4. **Ensure code is formatted**
@@ -193,13 +240,17 @@ Keep first line under 72 characters. Add details in body if needed.
 
 Before submitting a PR, ensure:
 
-- [ ] All tests pass (`uv run pytest`)
+- [ ] Tests for your changes pass (see [Testing Your Changes](#testing-your-changes))
 - [ ] Code coverage is maintained or improved
 - [ ] Code is formatted (`uv run ruff format --check .`)
 - [ ] Linting passes (`uv run ruff check .`)
 - [ ] Documentation is updated (README, docstrings, etc.)
 - [ ] CHANGELOG.md is updated (for user-facing changes)
-- [ ] Commit messages follow conventional commit format
+- [ ] Commit messages follow the [commit message guidelines](#commit-messages)
+
+!!! note "CI runs the full test suite"
+    Don't worry if some tooling tests (codespell, mypy, security) fail locally—CI will
+    run the complete test suite with all dependencies installed.
 
 ## Testing Guidelines
 
@@ -282,15 +333,15 @@ def sample_geoparquet():
 1. **Run benchmarks** to check for performance regressions:
    ```bash
    # Install previous release
-   git checkout v0.9.0 && pip install -e .
-   python scripts/version_benchmark.py --version-label "baseline" -o baseline.json -n 5
+   git checkout v0.9.0 && uv sync
+   uv run python scripts/version_benchmark.py --version-label "baseline" -o baseline.json -n 5
 
    # Install new version
-   git checkout main && pip install -e .
-   python scripts/version_benchmark.py --version-label "new" -o current.json -n 5
+   git checkout main && uv sync
+   uv run python scripts/version_benchmark.py --version-label "new" -o current.json -n 5
 
    # Compare results
-   python scripts/version_benchmark.py --compare baseline.json current.json
+   uv run python scripts/version_benchmark.py --compare baseline.json current.json
    ```
 
 2. **Review any regressions** (>25% slower on large files):
