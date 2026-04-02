@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
+import gc
 import os
+import platform
 import time
 
 import click
@@ -1044,6 +1046,12 @@ def read_spatial_to_arrow(
 
     finally:
         con.close()
+        # Force garbage collection on macOS ARM64 to prevent SIGABRT when
+        # reading multiple layers sequentially. GDAL's internal handles may
+        # not be fully released before the next connection opens.
+        # See: https://github.com/geoparquet/geoparquet-io/issues/322
+        if platform.system() == "Darwin" and platform.machine() == "arm64":
+            gc.collect()
 
 
 def _read_csv_to_arrow(

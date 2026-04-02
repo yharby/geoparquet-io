@@ -52,7 +52,7 @@ class TestGeojsonCrsDefault:
     """Tests for GeoJSON CRS defaulting in _determine_effective_crs()."""
 
     @patch("geoparquet_io.core.convert.detect_crs_from_spatial_file", return_value=None)
-    def test_geojson_defaults_to_wgs84_when_no_crs_detected(self, mock_detect):
+    def test_geojson_defaults_to_wgs84_when_no_crs_detected(self, _mock_detect):
         """GeoJSON with no detected CRS should return None (WGS84 default), not raise."""
         result = _determine_effective_crs(
             input_file="gs://bucket/data.geojson",
@@ -66,7 +66,7 @@ class TestGeojsonCrsDefault:
         assert result is None
 
     @patch("geoparquet_io.core.convert.detect_crs_from_spatial_file", return_value=None)
-    def test_non_geojson_still_raises_when_no_crs_detected(self, mock_detect):
+    def test_non_geojson_still_raises_when_no_crs_detected(self, _mock_detect):
         """Non-GeoJSON spatial files should still raise when CRS is missing."""
         with pytest.raises(click.ClickException, match="No CRS found"):
             _determine_effective_crs(
@@ -80,7 +80,7 @@ class TestGeojsonCrsDefault:
             )
 
     @patch("geoparquet_io.core.convert.detect_crs_from_spatial_file", return_value=None)
-    def test_geojson_verbose_logs_rfc7946(self, mock_detect):
+    def test_geojson_verbose_logs_rfc7946(self, _mock_detect):
         """Verbose mode should log the RFC 7946 default."""
         with patch("geoparquet_io.core.convert.debug") as mock_debug:
             _determine_effective_crs(
