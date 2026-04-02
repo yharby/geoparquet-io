@@ -10,6 +10,27 @@ geoparquet-io (gpio) is a Python CLI tool for fast I/O and transformation of Geo
 
 ---
 
+## Package Management: Always Use uv
+
+**uv is the ONLY supported package manager.** Do not use pip, pipx, or poetry.
+
+```bash
+# Install dependencies
+uv sync --all-extras
+
+# Run commands
+uv run pytest
+uv run gpio inspect file.parquet
+uv run ruff check .
+
+# Install CLI globally
+uv tool install geoparquet-io
+```
+
+All CI, documentation examples, and development workflows use `uv`. Never suggest pip or pipx alternatives.
+
+---
+
 ## Documentation Structure
 
 ### context/ Directory
@@ -89,29 +110,6 @@ geoparquet_io/
 | `gpio skills` |  | List and access LLM skills for gpio |
 | `gpio sort` | column, hilbert, quadkey | Commands for sorting GeoParquet files |
 <!-- END GENERATED: cli-commands -->
-
-<!-- BEGIN GENERATED: core-modules -->
-### Core Modules
-
-| Module | Purpose | Lines |
-|--------|---------|-------|
-| `common.py` |  | 4036 |
-| `validate.py` | GeoParquet file validation against specification r... | 2854 |
-| `inspect_utils.py` | Utilities for inspecting GeoParquet files. | 1548 |
-| `convert.py` |  | 1395 |
-| `duckdb_metadata.py` | DuckDB-based Parquet metadata extraction. | 1277 |
-| `arcgis.py` | ArcGIS Feature Service to GeoParquet conversion. | 1226 |
-| `extract.py` | Extract columns and rows from GeoParquet files. | 1225 |
-| `wfs.py` | WFS (Web Feature Service) to GeoParquet conversion... | 1193 |
-| `metadata_utils.py` | Utilities for extracting and formatting GeoParquet... | 1077 |
-| `extract_bigquery.py` |  | 934 |
-| `partition_common.py` |  | 908 |
-| `admin_datasets.py` |  | 735 |
-| `benchmark.py` | Benchmark utilities for comparing GeoParquet conve... | 701 |
-| `partition_admin_hierarchical.py` |  | 698 |
-| `upload.py` | Upload GeoParquet files to cloud object storage. | 675 |
-| ... | *38 more modules* | |
-<!-- END GENERATED: core-modules -->
 
 <!-- freshness: last-verified: 2026-03-20, maps-to: geoparquet_io/core/common.py, geoparquet_io/cli/decorators.py -->
 ### Key Patterns

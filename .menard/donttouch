@@ -19,7 +19,6 @@ docs/index.md:badges
 CLAUDE.md#Testing with uv
 CLAUDE.md#Test Markers
 CLAUDE.md#CLI Command Groups
-CLAUDE.md#Core Modules
 geoparquet_io/skills/geoparquet.md#Command Reference
 geoparquet_io/skills/geoparquet.md#Compression Options
 geoparquet_io/skills/geoparquet.md#Inspection Commands

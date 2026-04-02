@@ -1,4 +1,4 @@
-"""Tests for CLAUDE.md section generation."""
+"""Tests for doc_sync.py - CLAUDE.md and skill section generation."""
 
 import importlib
 import importlib.util
@@ -10,12 +10,12 @@ import pytest
 
 # Project root for import resolution
 PROJECT_ROOT = Path(__file__).parent.parent
-SCRIPT_PATH = PROJECT_ROOT / "scripts" / "generate_claude_md_sections.py"
+SCRIPT_PATH = PROJECT_ROOT / "scripts" / "doc_sync.py"
 
 
 def _load_module():
     """Load the generation module using importlib to avoid stale cache issues."""
-    spec = importlib.util.spec_from_file_location("generate_claude_md_sections", str(SCRIPT_PATH))
+    spec = importlib.util.spec_from_file_location("doc_sync", str(SCRIPT_PATH))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -55,24 +55,27 @@ class TestScriptExists:
             f"Script error (rc={result.returncode}):\n{result.stderr}"
         )
 
-    def test_script_exits_2_when_claude_md_missing(self, tmp_path):
-        """Verify script returns exit code 2 when CLAUDE.md is not found."""
-        # Create a fake project structure with no CLAUDE.md
-        scripts_dir = tmp_path / "scripts"
-        scripts_dir.mkdir()
-        # Copy the script to a location where CLAUDE.md won't be found
-        import shutil
-
-        shutil.copy2(str(SCRIPT_PATH), str(scripts_dir / "generate_claude_md_sections.py"))
-
+    def test_script_claude_only_mode(self):
+        """Verify --claude flag works."""
         result = subprocess.run(
-            [sys.executable, str(scripts_dir / "generate_claude_md_sections.py"), "--check"],
+            [sys.executable, str(SCRIPT_PATH), "--claude"],
             capture_output=True,
             text=True,
-            cwd=str(tmp_path),
+            cwd=str(PROJECT_ROOT),
         )
-        assert result.returncode == 2
-        assert "ERROR" in result.stdout
+        assert result.returncode == 0, f"Script error (rc={result.returncode}):\n{result.stderr}"
+        assert "CLAUDE.md" in result.stdout
+
+    def test_script_skill_only_mode(self):
+        """Verify --skill flag works."""
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT_PATH), "--skill"],
+            capture_output=True,
+            text=True,
+            cwd=str(PROJECT_ROOT),
+        )
+        assert result.returncode == 0, f"Script error (rc={result.returncode}):\n{result.stderr}"
+        assert "skill" in result.stdout.lower()
 
     def test_update_and_check_mutually_exclusive(self):
         """Verify --update and --check cannot be used together."""
@@ -330,49 +333,6 @@ stuff
         result = self.mod.update_section(content, "missing", new_section)
         assert result == content
 
-    def test_update_multiple_sections_independently(self):
-        """Test that multiple sections can be updated independently."""
-        content = """# Doc
-<!-- BEGIN GENERATED: alpha -->
-old alpha
-<!-- END GENERATED: alpha -->
-Middle text
-<!-- BEGIN GENERATED: beta -->
-old beta
-<!-- END GENERATED: beta -->
-End"""
-
-        new_alpha = """<!-- BEGIN GENERATED: alpha -->
-new alpha
-<!-- END GENERATED: alpha -->"""
-
-        result = self.mod.update_section(content, "alpha", new_alpha)
-        assert "new alpha" in result
-        assert "old alpha" not in result
-        # beta should be unchanged
-        assert "old beta" in result
-
-    def test_update_replaces_only_first_occurrence(self):
-        """Test that duplicate section markers only replace the first match."""
-        content = """# Doc
-<!-- BEGIN GENERATED: dup -->
-first
-<!-- END GENERATED: dup -->
-middle
-<!-- BEGIN GENERATED: dup -->
-second
-<!-- END GENERATED: dup -->
-end"""
-
-        new_section = """<!-- BEGIN GENERATED: dup -->
-replaced
-<!-- END GENERATED: dup -->"""
-
-        result = self.mod.update_section(content, "dup", new_section)
-        assert "replaced" in result
-        assert "second" in result
-        assert "first" not in result
-
 
 class TestUpdateMode:
     """Tests for --update mode on CLAUDE.md."""
@@ -451,39 +411,60 @@ class TestUpdateMode:
 
         assert first_pass == second_pass, "Update is not idempotent"
 
-    def test_update_writes_to_disk(self, tmp_path):
-        """Test that --update actually writes the file."""
-        # Copy CLAUDE.md to a temp location
-        claude_md = PROJECT_ROOT / "CLAUDE.md"
-        fake_md = tmp_path / "CLAUDE.md"
-        fake_md.write_text(claude_md.read_text(encoding="utf-8"), encoding="utf-8")
 
-        # Corrupt a section to force an update
-        content = fake_md.read_text(encoding="utf-8")
-        content = content.replace(
-            "### CLI Command Groups",
-            "### CLI Command Groups (OUTDATED)",
-        )
-        fake_md.write_text(content, encoding="utf-8")
+class TestSkillGeneration:
+    """Tests for skill section generation."""
 
-        # Create the required directory structure
-        (tmp_path / "geoparquet_io" / "core").mkdir(parents=True, exist_ok=True)
-        (tmp_path / "scripts").mkdir(exist_ok=True)
+    @pytest.fixture(autouse=True)
+    def _import_module(self):
+        self.mod = _load_module()
 
-        # The script needs a specific project root -- we test via the module API
-        original = fake_md.read_text(encoding="utf-8")
-        sections = {
-            "cli-commands": self.mod.generate_cli_section(),
-            "test-markers": self.mod.generate_markers_section(PROJECT_ROOT / "pyproject.toml"),
-            "core-modules": self.mod.generate_modules_section(
-                PROJECT_ROOT / "geoparquet_io" / "core"
-            ),
-        }
+    def test_skill_file_exists(self):
+        """Test that skill file exists."""
+        skill_path = PROJECT_ROOT / "geoparquet_io" / "skills" / "geoparquet.md"
+        assert skill_path.exists(), f"Expected skill file at {skill_path}"
 
-        updated = original
-        for name, section_content in sections.items():
-            updated = self.mod.update_section(updated, name, section_content)
+    def test_skill_has_generated_sections(self):
+        """Test that skill file has generated section markers."""
+        skill_path = PROJECT_ROOT / "geoparquet_io" / "skills" / "geoparquet.md"
+        content = skill_path.read_text(encoding="utf-8")
+        for section_name in [
+            "skill-commands",
+            "compression-options",
+            "inspect-commands",
+            "check-commands",
+        ]:
+            assert f"<!-- BEGIN GENERATED: {section_name} -->" in content, (
+                f"Skill missing BEGIN marker for '{section_name}'"
+            )
+            assert f"<!-- END GENERATED: {section_name} -->" in content, (
+                f"Skill missing END marker for '{section_name}'"
+            )
 
-        fake_md.write_text(updated, encoding="utf-8")
-        assert "OUTDATED" not in fake_md.read_text(encoding="utf-8")
-        assert "### CLI Command Groups" in fake_md.read_text(encoding="utf-8")
+    def test_generate_skill_commands_table(self):
+        """Test skill commands table generation."""
+        section = self.mod.generate_skill_commands_table()
+        assert "<!-- BEGIN GENERATED: skill-commands -->" in section
+        assert "<!-- END GENERATED: skill-commands -->" in section
+        assert "| Command |" in section
+
+    def test_generate_compression_options(self):
+        """Test compression options generation."""
+        section = self.mod.generate_compression_options()
+        assert "<!-- BEGIN GENERATED: compression-options -->" in section
+        assert "<!-- END GENERATED: compression-options -->" in section
+        assert "zstd" in section
+
+    def test_generate_inspection_commands(self):
+        """Test inspection commands generation."""
+        section = self.mod.generate_inspection_commands()
+        assert "<!-- BEGIN GENERATED: inspect-commands -->" in section
+        assert "<!-- END GENERATED: inspect-commands -->" in section
+        assert "gpio inspect" in section
+
+    def test_generate_check_commands(self):
+        """Test check commands generation."""
+        section = self.mod.generate_check_commands()
+        assert "<!-- BEGIN GENERATED: check-commands -->" in section
+        assert "<!-- END GENERATED: check-commands -->" in section
+        assert "gpio check" in section

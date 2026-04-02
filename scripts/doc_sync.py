@@ -7,7 +7,6 @@ to prevent drift between code and documentation.
 CLAUDE.md sections:
 - CLI command table from Click introspection
 - Test markers from pyproject.toml
-- Core modules index from filesystem
 
 skill (geoparquet.md) sections:
 - Command reference table
@@ -146,64 +145,6 @@ def generate_markers_section(pyproject_path: Path) -> str:
         lines.append(f"| `@pytest.mark.{marker['name']}` | {marker['description']} |")
 
     lines.append("<!-- END GENERATED: test-markers -->")
-    return "\n".join(lines)
-
-
-def _extract_module_docstring(content: str) -> str:
-    """Extract the first meaningful line from a module docstring."""
-    if not content.startswith('"""'):
-        return ""
-    end = content.find('"""', 3)
-    if end <= 0:
-        return ""
-    raw = content[3:end]
-    for line in raw.split("\n"):
-        stripped = line.strip()
-        if stripped:
-            return stripped
-    return ""
-
-
-def get_core_modules(core_path: Path) -> list[dict]:
-    """Scan core directory for Python modules."""
-    modules = []
-    for py_file in sorted(core_path.glob("*.py")):
-        if py_file.name.startswith("_"):
-            continue
-        content = py_file.read_text(encoding="utf-8")
-        line_count = len(content.splitlines())
-        docstring = _extract_module_docstring(content)
-        modules.append(
-            {
-                "name": py_file.name,
-                "lines": line_count,
-                "purpose": docstring,
-            }
-        )
-    return modules
-
-
-def generate_modules_section(core_path: Path) -> str:
-    """Generate the core modules markdown section."""
-    modules = get_core_modules(core_path)
-
-    lines = [
-        "<!-- BEGIN GENERATED: core-modules -->",
-        "### Core Modules",
-        "",
-        "| Module | Purpose | Lines |",
-        "|--------|---------|-------|",
-    ]
-
-    modules_sorted = sorted(modules, key=lambda x: x["lines"], reverse=True)[:15]
-    for mod in modules_sorted:
-        purpose = mod["purpose"][:50] + "..." if len(mod["purpose"]) > 50 else mod["purpose"]
-        lines.append(f"| `{mod['name']}` | {purpose} | {mod['lines']} |")
-
-    remaining = len(modules) - 15
-    if remaining > 0:
-        lines.append(f"| ... | *{remaining} more modules* | |")
-    lines.append("<!-- END GENERATED: core-modules -->")
     return "\n".join(lines)
 
 
@@ -355,7 +296,6 @@ def sync_claude_md(project_root: Path, update: bool, check: bool) -> tuple[bool,
     """
     claude_md = project_root / "CLAUDE.md"
     pyproject = project_root / "pyproject.toml"
-    core_path = project_root / "geoparquet_io" / "core"
 
     if not claude_md.exists():
         return False, ["ERROR: CLAUDE.md not found"]
@@ -363,16 +303,12 @@ def sync_claude_md(project_root: Path, update: bool, check: bool) -> tuple[bool,
     if not pyproject.exists():
         return False, ["ERROR: pyproject.toml not found"]
 
-    if not core_path.is_dir():
-        return False, [f"ERROR: core directory not found at {core_path}"]
-
     original = claude_md.read_text(encoding="utf-8")
     updated = original
 
     sections = {
         "cli-commands": generate_cli_section(),
         "test-markers": generate_markers_section(pyproject),
-        "core-modules": generate_modules_section(core_path),
     }
 
     for name, content in sections.items():
