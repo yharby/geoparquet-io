@@ -83,7 +83,7 @@ gpio convert reproject <input> <output> --target-crs EPSG:4326
 gpio extract <input> <output> --bbox "minx,miny,maxx,maxy"
 
 # Extract specific columns
-gpio extract <input> <output> --columns "id,name,geometry"
+gpio extract <input> <output> --include-cols "id,name,geometry"
 
 # Filter with SQL WHERE clause
 gpio extract <input> <output> --where "population > 10000"
@@ -117,8 +117,8 @@ gpio add bbox <input> <output>
 # Add bbox covering metadata to existing bbox column
 gpio add bbox-metadata <file>
 
-# Add country codes based on geometry location
-gpio add country-codes <input> <output>
+# Add admin division columns (country, state, etc.) based on geometry location
+gpio add admin-divisions <input> <output>
 
 # Add quadkey column
 gpio add quadkey <input> <output> --resolution 12
@@ -134,7 +134,7 @@ gpio partition admin <input> <output_dir>
 gpio partition string <input> <output_dir> --column "region"
 
 # Partition using KD-tree (balanced spatial splits)
-gpio partition kdtree <input> <output_dir> --max-rows-per-file 1000000
+gpio partition kdtree <input> <output_dir> --partitions 16
 
 # Partition by quadkey
 gpio partition quadkey <input> <output_dir> --resolution 6
@@ -164,7 +164,7 @@ Most commands accept these options:
 
 ```bash
 --compression zstd|snappy|gzip|lz4|brotli|none  # Default: zstd
---compression-level 1-22                         # For zstd (default: 3)
+--compression-level 1-22                         # For zstd (default: 15)
 --row-group-size 100000                          # Rows per group (default: varies)
 ```
 
@@ -263,8 +263,8 @@ gpio partition admin <input> ./partitioned/
 # By quadkey (uniform spatial grid)
 gpio partition quadkey <input> ./partitioned/ --resolution 6
 
-# By kdtree (balanced file sizes)
-gpio partition kdtree <input> ./partitioned/ --max-rows-per-file 500000
+# By kdtree (balanced file sizes, auto-targets ~120k rows per partition)
+gpio partition kdtree <input> ./partitioned/ --partitions 8
 ```
 
 ### Step 7: Generate STAC Metadata
@@ -302,7 +302,7 @@ gpio can read directly from cloud storage:
 gpio inspect s3://bucket/public-file.parquet
 
 # Private S3 files (uses ~/.aws/credentials)
-gpio inspect s3://bucket/private-file.parquet --profile my-profile
+gpio inspect s3://bucket/private-file.parquet --aws-profile my-profile
 
 # HTTP/HTTPS URLs
 gpio inspect https://example.com/data.parquet

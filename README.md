@@ -54,7 +54,7 @@ gpio sort quadkey input.parquet output_sorted.parquet   # Quadkey sorting
 gpio partition admin buildings.parquet output_dir/ --dataset gaul --levels continent,country,department
 
 # Remote-to-remote processing (S3, GCS, Azure, HTTPS)
-gpio add bbox s3://bucket/input.parquet s3://bucket/output.parquet --profile my-aws
+gpio add bbox s3://bucket/input.parquet s3://bucket/output.parquet --aws-profile my-aws
 gpio partition h3 gs://bucket/data.parquet gs://bucket/partitions/ --resolution 9
 gpio sort hilbert https://example.com/data.parquet s3://bucket/sorted.parquet
 

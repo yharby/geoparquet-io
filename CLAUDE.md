@@ -145,7 +145,7 @@ from geoparquet_io.core.common import is_remote_url, remote_write_context, setup
 
 ---
 
-<!-- freshness: last-verified: 2026-03-30, maps-to: pyproject.toml -->
+<!-- freshness: last-verified: 2026-04-02, maps-to: pyproject.toml -->
 ## Testing with uv
 
 ```bash
@@ -169,7 +169,7 @@ uv run pytest --cov=geoparquet_io --cov-report=term-missing
 | `@pytest.mark.integration` | marks end-to-end integration tests |
 <!-- END GENERATED: test-markers -->
 
-- **Coverage requirement**: 75% minimum (enforced), 80% for new code
+- **Coverage requirement**: 67% minimum (enforced)
 
 ---
 
