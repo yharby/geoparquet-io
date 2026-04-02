@@ -5693,6 +5693,7 @@ def benchmark(ctx):
     Subcommands:
       suite    Run comprehensive benchmark suite
       compare  Compare converter performance on a single file
+      explain  Show DuckDB query plan analysis (EXPLAIN ANALYZE)
       report   View and compare benchmark results
     """
     ctx.ensure_object(dict)
@@ -5914,6 +5915,73 @@ def benchmark_suite(
     if output:
         Path(output).write_text(result.to_json())
         success(f"Results saved to {output}")
+
+
+@benchmark.command("explain")
+@click.argument("input_file", type=click.Path(exists=True))
+@click.option(
+    "--query",
+    "-q",
+    type=str,
+    default=None,
+    help="Custom SQL query. Use {file} as placeholder for file path.",
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["table", "json"]),
+    default="table",
+    help="Output format (default: table)",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(),
+    default=None,
+    help="Save results to JSON file",
+)
+@verbose_option
+def benchmark_explain(
+    input_file,
+    query,
+    output_format,
+    output,
+    verbose,
+):
+    """
+    Show DuckDB query plan analysis (EXPLAIN ANALYZE).
+
+    Runs EXPLAIN ANALYZE on a DuckDB query against a GeoParquet file to reveal
+    per-operator timing, cardinality, filter pushdown, and row group pruning.
+
+    \b
+    Example:
+        gpio benchmark explain input.parquet
+        gpio benchmark explain input.parquet --format json
+        gpio benchmark explain input.parquet --query "SELECT * FROM read_parquet('{file}') WHERE id > 10"
+        gpio benchmark explain input.parquet --output plan.json
+    """
+    configure_verbose(verbose)
+    from geoparquet_io.core.benchmark import (
+        explain_analyze,
+        format_explain_output,
+    )
+    from geoparquet_io.core.logging_config import progress
+
+    result = explain_analyze(
+        file_path=input_file,
+        query=query,
+    )
+
+    formatted = format_explain_output(result, output_format=output_format)
+    progress(formatted)
+
+    if output:
+        from pathlib import Path
+
+        json_output = format_explain_output(result, output_format="json")
+        Path(output).write_text(json_output)
+        progress(f"\nResults saved to: {output}")
 
 
 @benchmark.command("report")
