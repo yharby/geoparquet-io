@@ -30,13 +30,21 @@ Be proactive - analyze the data and make recommendations rather than waiting to 
 | Command | Subcommands | Description |
 |---------|-------------|-------------|
 | `gpio add` | a5, admin-divisions, bbox, bbox-metadata, h3, kdtree, quadkey, s2 | Commands for enhancing GeoParquet files in various ways. |
-| `gpio benchmark` | compare, report, suite | Benchmark GeoParquet performance. |
-| `gpio check` | all, bbox, compression, row-group, spatial, spec, stac | Check GeoParquet files for best practices. |
-| `gpio convert` | csv, flatgeobuf, geojson, geopackage, geoparquet, reproject, shapefile | Convert between formats and coordinate systems. |
-| `gpio extract` | arcgis, bigquery, geoparquet, wfs | Extract data from files and services to GeoParquet. |
-| `gpio inspect` | head, layers, meta, stats, summary, tail | Inspect GeoParquet files and show metadata, previews, or sta... |
+| `gpio benchmark` | compare, report, suite | Benchmark GeoParquet performance.
+
+    Commands for... |
+| `gpio check` | all, bbox, compression, row-group, spatial, spec, stac | Check GeoParquet files for best practices.
+
+    By default,... |
+| `gpio convert` | csv, flatgeobuf, geojson, geopackage, geoparquet, reproject, shapefile | Convert between formats and coordinate systems.
+
+   ... |
+| `gpio extract` | arcgis, bigquery, geoparquet, wfs | Extract data from files and services to GeoParquet.
+
+    By... |
+| `gpio inspect` | head, layers, meta, stats, summary, tail | Inspect GeoParquet files and show metadata, previews, or... |
 | `gpio partition` | a5, admin, h3, kdtree, quadkey, s2, string | Commands for partitioning GeoParquet files. |
-| `gpio publish` | stac, upload | Commands for publishing GeoParquet data (STAC metadata, clou... |
+| `gpio publish` | stac, upload | Commands for publishing GeoParquet data (STAC metadata,... |
 | `gpio sort` | column, hilbert, quadkey | Commands for sorting GeoParquet files. |
 <!-- END GENERATED: skill-commands -->
 
