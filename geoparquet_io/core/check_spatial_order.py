@@ -382,7 +382,7 @@ def _generate_sample_query_bboxes(
     Returns:
         List of bbox dicts with xmin, ymin, xmax, ymax.
     """
-    rng = _random.Random(seed)
+    rng = _random.Random(seed)  # nosec B311 - not used for security
     x_range = extent["xmax"] - extent["xmin"]
     y_range = extent["ymax"] - extent["ymin"]
     query_width = x_range * query_fraction
@@ -390,8 +390,8 @@ def _generate_sample_query_bboxes(
 
     samples = []
     for _ in range(num_samples):
-        x_start = rng.uniform(extent["xmin"], extent["xmax"] - query_width)
-        y_start = rng.uniform(extent["ymin"], extent["ymax"] - query_height)
+        x_start = rng.uniform(extent["xmin"], extent["xmax"] - query_width)  # nosec B311
+        y_start = rng.uniform(extent["ymin"], extent["ymax"] - query_height)  # nosec B311
         samples.append(
             {
                 "xmin": x_start,
