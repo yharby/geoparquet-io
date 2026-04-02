@@ -10,10 +10,6 @@ LICENSE
 # Version constraints with security rationale (intentional pins)
 pyproject.toml:*CVE-*
 
-# Intentional duplicates where README is source of truth
-# These are synced manually and shouldn't trigger staleness
-docs/index.md#Features <- README.md#Features
-
 # Badge images and shields (visual assets, not prose)
 README.md:badges
 docs/index.md:badges
