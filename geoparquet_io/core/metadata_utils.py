@@ -1075,3 +1075,123 @@ def format_all_metadata(
 
         # Section 3: GeoParquet Metadata
         format_geoparquet_metadata(parquet_file, False)
+
+
+def format_row_group_geo_stats(parquet_file: str, json_output: bool = False) -> None:
+    """
+    Format and display per-row-group geo_bbox statistics.
+
+    Shows a table with row_group_id, num_rows, xmin, ymin, xmax, ymax for
+    each row group. Useful for verifying spatial locality after Hilbert sorting.
+
+    Args:
+        parquet_file: Path to the parquet file
+        json_output: Whether to output as JSON
+    """
+    from geoparquet_io.core.duckdb_metadata import (
+        get_file_metadata,
+        get_per_row_group_bbox_stats,
+        has_bbox_column,
+    )
+
+    safe_url = safe_file_url(parquet_file, verbose=False)
+    has_bbox, bbox_col_name = has_bbox_column(safe_url)
+
+    if not has_bbox or not bbox_col_name:
+        if json_output:
+            print(json.dumps({"row_group_geo_stats": [], "message": "No bbox column found"}))
+        else:
+            console = Console()
+            console.print()
+            console.print("[bold]Per-Row-Group geo_bbox Statistics[/bold]")
+            console.print("━" * 60)
+            console.print("[yellow]No bbox column found in this file.[/yellow]")
+            console.print("[dim]Add a bbox column with: gpio add bbox <file>[/dim]")
+            console.print()
+        return
+
+    rg_stats = get_per_row_group_bbox_stats(safe_url, bbox_col_name)
+    file_meta = get_file_metadata(safe_url)
+    num_rows_per_rg = _get_num_rows_per_row_group(safe_url, file_meta)
+
+    # Merge num_rows into stats
+    stats_with_rows = _merge_row_counts(rg_stats, num_rows_per_rg)
+
+    if json_output:
+        print(json.dumps({"row_group_geo_stats": stats_with_rows}, indent=2))
+    else:
+        _format_geo_stats_terminal(stats_with_rows)
+
+
+def _get_num_rows_per_row_group(safe_url: str, file_meta: dict) -> dict[int, int]:
+    """Get num_rows per row group from file metadata.
+
+    Returns a mapping of row_group_id to row count.
+    """
+    from geoparquet_io.core.duckdb_metadata import _get_connection_for_file, _safe_url
+
+    connection, should_close = _get_connection_for_file(safe_url)
+    try:
+        result = connection.execute(f"""
+            SELECT row_group_id, row_group_num_rows
+            FROM parquet_metadata('{_safe_url(safe_url)}')
+            GROUP BY row_group_id, row_group_num_rows
+            ORDER BY row_group_id
+        """).fetchall()
+        return {row[0]: row[1] for row in result}
+    finally:
+        if should_close:
+            connection.close()
+
+
+def _merge_row_counts(rg_stats: list[dict], num_rows_per_rg: dict[int, int]) -> list[dict]:
+    """Merge row counts into row group stats."""
+    merged = []
+    for stat in rg_stats:
+        rg_id = stat["row_group_id"]
+        merged.append(
+            {
+                "row_group_id": rg_id,
+                "num_rows": num_rows_per_rg.get(rg_id, 0),
+                "xmin": stat["xmin"],
+                "ymin": stat["ymin"],
+                "xmax": stat["xmax"],
+                "ymax": stat["ymax"],
+            }
+        )
+    return merged
+
+
+def _format_geo_stats_terminal(stats: list[dict]) -> None:
+    """Render per-row-group geo_bbox stats as a Rich table."""
+    console = Console()
+    console.print()
+    console.print("[bold]Per-Row-Group geo_bbox Statistics[/bold]")
+    console.print("━" * 60)
+
+    if not stats:
+        console.print("[yellow]No geo_bbox statistics found.[/yellow]")
+        console.print()
+        return
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Row Group", justify="right")
+    table.add_column("Rows", justify="right")
+    table.add_column("xmin", justify="right")
+    table.add_column("ymin", justify="right")
+    table.add_column("xmax", justify="right")
+    table.add_column("ymax", justify="right")
+
+    for stat in stats:
+        table.add_row(
+            str(stat["row_group_id"]),
+            f"{stat['num_rows']:,}",
+            f"{stat['xmin']:.6f}",
+            f"{stat['ymin']:.6f}",
+            f"{stat['xmax']:.6f}",
+            f"{stat['ymax']:.6f}",
+        )
+
+    console.print(table)
+    console.print(f"\n[dim]{len(stats)} row group(s) with geo_bbox statistics[/dim]")
+    console.print()

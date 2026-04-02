@@ -778,3 +778,42 @@ def from_wfs(
         max_workers=max_workers,
         page_size=page_size,
     )
+
+
+def get_row_group_geo_stats(parquet_file: str) -> list[dict]:
+    """
+    Get per-row-group geo_bbox statistics from a GeoParquet file.
+
+    Returns a list of dicts with row_group_id, num_rows, xmin, ymin,
+    xmax, ymax for each row group. Useful for verifying spatial locality
+    after Hilbert sorting.
+
+    Args:
+        parquet_file: Path to the parquet file
+
+    Returns:
+        List of dicts with per-row-group bbox statistics.
+        Empty list if the file has no bbox column.
+    """
+    from geoparquet_io.core.common import safe_file_url
+    from geoparquet_io.core.duckdb_metadata import (
+        get_file_metadata,
+        get_per_row_group_bbox_stats,
+        has_bbox_column,
+    )
+    from geoparquet_io.core.metadata_utils import (
+        _get_num_rows_per_row_group,
+        _merge_row_counts,
+    )
+
+    safe_url = safe_file_url(parquet_file, verbose=False)
+    has_bbox, bbox_col_name = has_bbox_column(safe_url)
+
+    if not has_bbox or not bbox_col_name:
+        return []
+
+    rg_stats = get_per_row_group_bbox_stats(safe_url, bbox_col_name)
+    file_meta = get_file_metadata(safe_url)
+    num_rows_per_rg = _get_num_rows_per_row_group(safe_url, file_meta)
+
+    return _merge_row_counts(rg_stats, num_rows_per_rg)
