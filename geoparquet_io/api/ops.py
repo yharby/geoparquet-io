@@ -828,3 +828,32 @@ def get_row_group_geo_stats(parquet_file: str) -> list[dict]:
     num_rows_per_rg = _get_num_rows_per_row_group(safe_url, file_meta)
 
     return _merge_row_counts(rg_stats, num_rows_per_rg)
+
+
+def compression_stats(path: str) -> list[dict]:
+    """
+    Get per-column compression ratios for a Parquet file.
+
+    Queries Parquet metadata to compute compressed and uncompressed sizes
+    per column, along with the compression ratio.
+
+    Args:
+        path: Path or URL to the Parquet file
+
+    Returns:
+        List of dicts ordered by compressed_bytes descending, each with:
+        - column_name: Column path in schema
+        - compression: Compression codec name
+        - compressed_bytes: Total compressed size in bytes
+        - uncompressed_bytes: Total uncompressed size in bytes
+        - ratio: Compression ratio (uncompressed / compressed)
+
+    Example:
+        >>> from geoparquet_io.api import ops
+        >>> stats = ops.compression_stats('data.parquet')
+        >>> for col in stats:
+        ...     print(f"{col['column_name']}: {col['ratio']}x")
+    """
+    from geoparquet_io.core.duckdb_metadata import get_compression_stats
+
+    return get_compression_stats(str(path))

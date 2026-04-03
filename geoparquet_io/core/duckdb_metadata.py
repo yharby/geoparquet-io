@@ -579,6 +579,51 @@ def get_row_group_metadata(parquet_file: str, con=None) -> list[dict]:
             connection.close()
 
 
+def get_compression_stats(parquet_file: str, con=None) -> list[dict]:
+    """Get per-column compression statistics from Parquet metadata.
+
+    Queries parquet_metadata() and aggregates compressed/uncompressed sizes
+    per column across all row groups.
+
+    Args:
+        parquet_file: Path or URL to the parquet file
+        con: Optional existing DuckDB connection
+
+    Returns:
+        List of dicts ordered by compressed_bytes descending, each with:
+        - column_name: Column path in schema
+        - compression: Compression codec name
+        - compressed_bytes: Total compressed size in bytes
+        - uncompressed_bytes: Total uncompressed size in bytes
+        - ratio: Compression ratio (uncompressed / compressed), rounded to 2 decimals
+    """
+    safe_url = _safe_url(parquet_file)
+    connection, should_close = _get_connection_for_file(parquet_file, con, load_spatial=False)
+
+    try:
+        result = connection.execute(f"""
+            SELECT
+                path_in_schema AS column_name,
+                ANY_VALUE(compression) AS compression,
+                SUM(total_compressed_size)::BIGINT AS compressed_bytes,
+                SUM(total_uncompressed_size)::BIGINT AS uncompressed_bytes,
+                ROUND(
+                    SUM(total_uncompressed_size)::FLOAT
+                    / NULLIF(SUM(total_compressed_size), 0),
+                    2
+                ) AS ratio
+            FROM parquet_metadata('{safe_url}')
+            GROUP BY path_in_schema
+            ORDER BY compressed_bytes DESC
+        """).fetchall()
+
+        columns = [desc[0] for desc in connection.description]
+        return [dict(zip(columns, row, strict=True)) for row in result]
+    finally:
+        if should_close:
+            connection.close()
+
+
 def get_row_count(parquet_file: str, con=None) -> int:
     """Get total row count from file metadata."""
     metadata = get_file_metadata(parquet_file, con)

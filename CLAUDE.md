@@ -74,9 +74,9 @@ geoparquet_io/
 |--------|---------|-------|
 | `common.py` |  | 4036 |
 | `validate.py` | GeoParquet file validation against specification r... | 2854 |
-| `inspect_utils.py` | Utilities for inspecting GeoParquet files. | 1548 |
+| `inspect_utils.py` | Utilities for inspecting GeoParquet files. | 1608 |
 | `convert.py` |  | 1395 |
-| `duckdb_metadata.py` | DuckDB-based Parquet metadata extraction. | 1277 |
+| `duckdb_metadata.py` | DuckDB-based Parquet metadata extraction. | 1322 |
 | `arcgis.py` | ArcGIS Feature Service to GeoParquet conversion. | 1226 |
 | `extract.py` | Extract columns and rows from GeoParquet files. | 1225 |
 | `metadata_utils.py` | Utilities for extracting and formatting GeoParquet... | 1197 |
