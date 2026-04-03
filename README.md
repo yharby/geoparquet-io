@@ -7,18 +7,22 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/geoparquet/geoparquet-io/blob/main/LICENSE)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-`geoparquet-io` (or `gpio`) offers a CLI and a fluent Python API to help you create, validate, and optimize GeoParquet files. It is written in Python and uses DuckDB (with GDAL embedded for legacy format support), PyArrow, and `obstore` for fast operations on larger-than-memory datasets. By default, gpio enforces best practices: bbox columns, Hilbert ordering, ZSTD compression, and smart row group sizes. Additional features include:
-- Unix pipes with Arrow IPC streaming
-- Read and write to S3, GCS, Azure, HTTPS, etc.
-- Easily add spatial indices (bbox, H3, quadkey, S2, A5, KD-tree)
-- Support for GeoParquet 1.1 and 2.0
-- bbox-based subsetting of datasets for spatial filtering and extraction
-- Service extraction from ArcGIS Feature Services, BigQuery tables, and WFS → GeoParquet
-- Easy inspection of metadata, row previews, and statistics
-- PMTiles generation via the gpio-pmtiles plugin
-- A Claude Code skill for AI-assisted spatial data workflows
-
 **[Documentation](https://geoparquet.io/)** · **[Quick Start](https://geoparquet.io/getting-started/quickstart/)** · **[Python API](https://geoparquet.io/api/python-api/)**  · **[Contributing](https://geoparquet.io/contributing/)**
+
+`geoparquet-io` offers a CLI and a fluent Python API to help you create, validate, and optimize GeoParquet files.
+
+`geoparquet-io` (or, `gpio`) is written in Python and uses DuckDB (with GDAL embedded for legacy format support), PyArrow, and `obstore` for fast operations on larger-than-memory datasets. By default, `gpio` enforces best practices: bbox columns, Hilbert ordering, ZSTD compression, and smart row group sizes.
+
+Additional features include:
+- **Unix pipes** with Arrow IPC streaming
+- Read and write to **object storage** (S3, GCS, Azure, HTTPS, etc.)
+- Easily add **spatial indices** (bbox, H3, quadkey, S2, A5, KD-tree)
+- Support for **GeoParquet 1.1 and 2.0**
+- **bbox-based subsetting** of datasets for spatial filtering and extraction
+- **Service extraction** from ArcGIS Feature Services, BigQuery tables, and WFS → GeoParquet
+- **Easy inspection** of metadata, row previews, and statistics
+- **PMTiles** generation via the `gpio-pmtiles` plugin
+- A **Claude Code skill** for AI-assisted spatial data workflows
 
 ## Installation
 
