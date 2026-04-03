@@ -64,13 +64,6 @@
       "reviewed_by": "Claude"
     },
     {
-      "code_file": "scripts/doc_sync.py",
-      "doc_target": "geoparquet_io/skills/geoparquet.md",
-      "reviewed_at": "2026-04-02T15:00:51.030232+00:00",
-      "code_commit_at_review": "d71867c",
-      "reviewed_by": "Claude"
-    },
-    {
       "code_file": "geoparquet_io/api/table.py",
       "doc_target": "docs/api/python-api.md#Table Class",
       "reviewed_at": "2026-04-02T15:00:51.133038+00:00",
@@ -110,6 +103,13 @@
       "doc_target": "CLAUDE.md#DuckDB 1.5 Patterns (MUST follow)",
       "reviewed_at": "2026-04-02T19:37:26.416743+00:00",
       "code_commit_at_review": "3051d19",
+      "reviewed_by": "user"
+    },
+    {
+      "code_file": "scripts/doc_sync.py",
+      "doc_target": "geoparquet_io/skills/geoparquet.md",
+      "reviewed_at": "2026-04-03T05:50:53.782423+00:00",
+      "code_commit_at_review": "5906d11",
       "reviewed_by": "user"
     }
   ]

@@ -394,6 +394,56 @@ def sync_skill_md(project_root: Path, update: bool, check: bool) -> tuple[bool, 
     return True, messages
 
 
+def sync_contributing_md(project_root: Path, update: bool, check: bool) -> tuple[bool, list[str]]:
+    """Sync contributing.md generated sections.
+
+    Returns:
+        Tuple of (changed, messages).
+    """
+    contrib_md = project_root / "docs" / "contributing.md"
+    pyproject = project_root / "pyproject.toml"
+
+    if not contrib_md.exists():
+        return False, ["ERROR: docs/contributing.md not found"]
+
+    if not pyproject.exists():
+        return False, ["ERROR: pyproject.toml not found"]
+
+    original = contrib_md.read_text(encoding="utf-8")
+    updated = original
+
+    sections = {
+        "test-markers": generate_markers_section(pyproject),
+    }
+
+    for name, content in sections.items():
+        updated = update_section(updated, name, content)
+
+    if updated == original:
+        return False, ["contributing.md: up to date"]
+
+    messages = []
+    for name in sections:
+        if f"<!-- BEGIN GENERATED: {name} -->" not in original:
+            messages.append(f"contributing.md: would ADD {name}")
+        else:
+            pattern = (
+                rf"<!-- BEGIN GENERATED: {re.escape(name)} -->"
+                r".*?"
+                rf"<!-- END GENERATED: {re.escape(name)} -->"
+            )
+            old_match = re.search(pattern, original, re.DOTALL)
+            new_match = re.search(pattern, updated, re.DOTALL)
+            if old_match and new_match and old_match.group() != new_match.group():
+                messages.append(f"contributing.md: would UPDATE {name}")
+
+    if update:
+        contrib_md.write_text(updated, encoding="utf-8")
+        messages = ["contributing.md: updated"]
+
+    return True, messages
+
+
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Sync generated documentation sections from code")
@@ -422,6 +472,12 @@ def main() -> int:
     # Sync skill (geoparquet.md)
     if not args.claude:
         changed, messages = sync_skill_md(project_root, args.update, args.check)
+        any_changed = any_changed or changed
+        all_messages.extend(messages)
+
+    # Sync contributing.md
+    if not args.claude and not args.skill:
+        changed, messages = sync_contributing_md(project_root, args.update, args.check)
         any_changed = any_changed or changed
         all_messages.extend(messages)
 
