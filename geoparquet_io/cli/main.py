@@ -5557,6 +5557,71 @@ def check_spec(
         raise click.ClickException(str(e)) from e
 
 
+@check.command(name="optimization", cls=GlobAwareCommand)
+@click.argument("parquet_file")
+@click.option("--verbose", is_flag=True, help="Print detailed diagnostics")
+@check_partition_options
+def check_optimization_cmd(
+    parquet_file,
+    verbose,
+    check_all_files,
+    check_sample,
+):
+    """Check combined spatial query optimization.
+
+    Evaluates five factors that affect spatial query performance:
+
+    \b
+    1. Native geo types (v2.0 or parquet-geo-only)
+    2. Per-row-group geo bbox statistics
+    3. Spatial sorting (Hilbert or similar)
+    4. Row group size (10k-50k rows optimal)
+    5. ZSTD compression on geometry column
+
+    \b
+    Scoring:
+      5/5  Fully optimized for spatial queries
+      3-4  Partially optimized, improvements possible
+      0-2  Not optimized for spatial queries
+
+    \b
+    Examples:
+      gpio check optimization data.parquet
+      gpio check optimization data.parquet --verbose
+    """
+    from geoparquet_io.core.check_optimization import check_optimization
+    from geoparquet_io.core.partition_reader import get_files_to_check
+
+    configure_verbose(verbose)
+
+    files_to_check, notice = get_files_to_check(
+        parquet_file, check_all=check_all_files, check_sample=check_sample, verbose=verbose
+    )
+
+    if notice:
+        click.echo(click.style(f"\U0001f4c1 {notice}", fg="cyan"))
+
+    if not files_to_check:
+        click.echo(click.style("No parquet files found", fg="red"))
+        return
+
+    runner = MultiFileCheckRunner(files_to_check, verbose=verbose)
+
+    for file_path in files_to_check:
+        runner.start_file(file_path)
+
+        show_output = runner.verbose or not runner.is_multi_file
+        quiet = not show_output
+
+        result = check_optimization(
+            file_path, verbose=verbose and show_output, return_results=True, quiet=quiet
+        )
+
+        runner.record_result(file_path, result)
+
+    runner.print_summary()
+
+
 # Skills command (for LLM integration)
 @cli.command()
 @click.option("--show", is_flag=True, help="Print skill content to stdout")

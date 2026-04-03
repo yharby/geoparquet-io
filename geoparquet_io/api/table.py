@@ -2159,6 +2159,30 @@ class Table:
         )
         return CheckResult(results, check_type="bloom_filters")
 
+    def check_optimization(self) -> CheckResult:
+        """
+        Check combined spatial query optimization.
+
+        Evaluates five factors that affect spatial query performance:
+        native geo types, geo bbox stats, spatial sorting, row group size,
+        and compression.
+
+        Returns:
+            CheckResult with optimization analysis including score and level
+
+        Example:
+            >>> table = gpio.read('data.parquet')
+            >>> result = table.check_optimization()
+            >>> print(result.to_dict()['score'], '/', result.to_dict()['total_checks'])
+        """
+        from geoparquet_io.api.check import CheckResult
+        from geoparquet_io.core.check_optimization import check_optimization
+
+        results = self._with_temp_file(
+            check_optimization, verbose=False, return_results=True, quiet=True
+        )
+        return CheckResult(results, check_type="optimization")
+
     def validate(self, version: str | None = None) -> CheckResult:
         """
         Validate against GeoParquet specification.

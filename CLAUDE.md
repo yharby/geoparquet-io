@@ -57,7 +57,7 @@ geoparquet_io/
 |---------------|-------------|-------------|
 | `gpio add` | a5, admin-divisions, bbox, bbox-metadata, h3, kdtree, quadkey, s2 | Commands for enhancing GeoParquet files in various ways |
 | `gpio benchmark` | compare, report, suite | Benchmark GeoParquet performance |
-| `gpio check` | all, bbox, compression, row-group, spatial, spec, stac | Check GeoParquet files for best practices |
+| `gpio check` | all, bbox, compression, optimization, row-group, spatial, spec, stac | Check GeoParquet files for best practices |
 | `gpio convert` | csv, flatgeobuf, geojson, geopackage, geoparquet, reproject, shapefile | Convert between formats and coordinate systems |
 | `gpio extract` | arcgis, bigquery, geoparquet, wfs | Extract data from files and services to GeoParquet |
 | `gpio inspect` | head, layers, meta, stats, summary, tail | Inspect GeoParquet files and show metadata, previews, or statistics |
@@ -87,7 +87,7 @@ geoparquet_io/
 | `benchmark.py` | Benchmark utilities for comparing GeoParquet conve... | 701 |
 | `partition_admin_hierarchical.py` |  | 698 |
 | `upload.py` | Upload GeoParquet files to cloud object storage. | 675 |
-| ... | *38 more modules* | |
+| ... | *39 more modules* | |
 <!-- END GENERATED: core-modules -->
 
 <!-- freshness: last-verified: 2026-03-20, maps-to: geoparquet_io/core/common.py, geoparquet_io/cli/decorators.py -->
