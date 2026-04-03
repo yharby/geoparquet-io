@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/geoparquet/geoparquet-io/blob/main/LICENSE)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-**[Documentation](https://geoparquet.io/)** · **[Quick Start](https://geoparquet.io/getting-started/quickstart/)** · **[Python API](https://geoparquet.io/api/python-api/)**  · **[Contributing](https://geoparquet.io/contributing/)**
+**[Documentation](https://geoparquet.io/)** · **[Quick Start](https://geoparquet.io/getting-started/quickstart/)** · **[Python API](https://geoparquet.io/api/python-api/)** · **[Contributing](https://geoparquet.io/contributing/)**
 
 `geoparquet-io` offers a CLI and a fluent Python API to help you create, validate, and optimize GeoParquet files.
 
@@ -76,7 +76,7 @@ gpio convert large_roads.shp | \
 ```
 See the [User Guide](https://geoparquet.io/guide/inspect/) for spatial indexing, partitioning, cloud storage, and more.
 
-### For Development
+## For Development
 
 ```bash
 git clone https://github.com/geoparquet/geoparquet-io.git
