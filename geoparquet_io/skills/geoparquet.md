@@ -31,7 +31,7 @@ Be proactive - analyze the data and make recommendations rather than waiting to 
 |---------|-------------|-------------|
 | `gpio add` | a5, admin-divisions, bbox, bbox-metadata, h3, kdtree, quadkey, s2 | Commands for enhancing GeoParquet files in various ways. |
 | `gpio benchmark` | compare, report, suite | Benchmark GeoParquet performance. Commands for measuring... |
-| `gpio check` | all, bbox, compression, row-group, spatial, spec, stac | Check GeoParquet files for best practices. By default, runs... |
+| `gpio check` | all, bbox, compression, optimization, row-group, spatial, spec, stac | Check GeoParquet files for best practices. By default, runs... |
 | `gpio convert` | csv, flatgeobuf, geojson, geopackage, geoparquet, reproject, shapefile | Convert between formats and coordinate systems.... |
 | `gpio extract` | arcgis, bigquery, geoparquet, wfs | Extract data from files and services to GeoParquet. By... |
 | `gpio inspect` | head, layers, meta, stats, summary, tail | Inspect GeoParquet files and show metadata, previews, or... |
@@ -66,6 +66,7 @@ gpio check all <file>
 # Individual checks
 gpio check bbox <file>
 gpio check compression <file>
+gpio check optimization <file>
 gpio check row-group <file>
 gpio check spatial <file>
 gpio check spec <file>
