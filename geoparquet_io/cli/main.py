@@ -2056,6 +2056,12 @@ def inspect_stats(parquet_file, json_output, markdown_output, verbose):
     default=1,
     help="Number of row groups to display (default: 1)",
 )
+@click.option(
+    "--geo-stats",
+    "meta_geo_stats",
+    is_flag=True,
+    help="Show per-row-group geo_bbox statistics",
+)
 @click.option("--json", "json_output", is_flag=True, help="Output as JSON for scripting")
 @verbose_option
 def inspect_meta(
@@ -2064,6 +2070,7 @@ def inspect_meta(
     meta_parquet,
     meta_parquet_geo,
     meta_row_groups,
+    meta_geo_stats,
     json_output,
     verbose,
 ):
@@ -2076,6 +2083,7 @@ def inspect_meta(
         gpio inspect meta data.parquet --geo          # GeoParquet 'geo' key only
         gpio inspect meta data.parquet --parquet      # Parquet file metadata only
         gpio inspect meta data.parquet --row-groups 5 # Show 5 row groups
+        gpio inspect meta data.parquet --geo-stats    # Per-row-group bbox stats
     """
     from geoparquet_io.core.common import (
         setup_aws_profile_if_needed,
@@ -2094,6 +2102,7 @@ def inspect_meta(
             meta_parquet_geo,
             meta_row_groups,
             json_output,
+            meta_geo_stats,
         )
     except Exception as e:
         raise _friendly_parquet_error(e, parquet_file) from e
@@ -2950,9 +2959,12 @@ def _handle_meta_display(
     parquet_geo: bool,
     row_groups: int,
     json_output: bool,
+    geo_stats: bool = False,
 ) -> None:
     """CLI wrapper for metadata display - delegates to core function."""
-    display_metadata(parquet_file, parquet, geoparquet, parquet_geo, row_groups, json_output)
+    display_metadata(
+        parquet_file, parquet, geoparquet, parquet_geo, row_groups, json_output, geo_stats
+    )
 
 
 # Sort commands group

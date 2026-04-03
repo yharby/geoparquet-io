@@ -1187,6 +1187,27 @@ if result:
     print("Passed!")
 ```
 
+### Row Group Geo Statistics
+
+Inspect per-row-group bounding box statistics to verify spatial locality:
+
+```python
+from geoparquet_io import get_row_group_geo_stats
+
+# Get stats for each row group
+stats = get_row_group_geo_stats('hilbert_sorted.parquet')
+
+for rg in stats:
+    print(f"Row group {rg['row_group_id']}: "
+          f"{rg['num_rows']} rows, "
+          f"bbox=[{rg['xmin']:.2f}, {rg['ymin']:.2f}, "
+          f"{rg['xmax']:.2f}, {rg['ymax']:.2f}]")
+
+# Works with both:
+# - Native Parquet geo stats (GeoParquet 2.0, parquet-geo-only)
+# - Bbox column statistics (files with a bbox column)
+```
+
 ## See Also
 
 - [Command Piping](../guide/piping.md) - CLI piping for shell workflows

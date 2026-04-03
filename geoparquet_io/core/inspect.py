@@ -393,6 +393,7 @@ def display_metadata(
     parquet_geo: bool = False,
     row_groups: int = 1,
     json_output: bool = False,
+    geo_stats: bool = False,
 ) -> None:
     """Display metadata for a GeoParquet file.
 
@@ -403,13 +404,19 @@ def display_metadata(
         parquet_geo: Show only Parquet geospatial metadata
         row_groups: Number of row groups to display
         json_output: Output as JSON
+        geo_stats: Show per-row-group geo_bbox statistics
     """
     from geoparquet_io.core.metadata_utils import (
         format_all_metadata,
         format_geoparquet_metadata,
         format_parquet_geo_metadata,
         format_parquet_metadata_enhanced,
+        format_row_group_geo_stats,
     )
+
+    if geo_stats:
+        format_row_group_geo_stats(parquet_file, json_output, row_groups)
+        return
 
     # Count how many specific flags were set
     specific_flags = sum([parquet, geoparquet, parquet_geo])
