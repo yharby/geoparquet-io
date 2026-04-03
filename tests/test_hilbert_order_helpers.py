@@ -149,7 +149,9 @@ class TestHilbertRgSizeGuidance:
                 row_group_rows=100000,
                 geoparquet_version="1.1",
             )
-        assert "spatial filter pushdown" not in caplog.text
+        # Should NOT show the row group size guidance (check for specific phrase)
+        # Note: v1.1 warning about "no spatial filter pushdown benefit" IS expected
+        assert "Smaller row groups" not in caplog.text
 
     @patch("geoparquet_io.core.hilbert_order._hilbert_order_file_based")
     def test_no_rg_rows_specified_no_guidance(self, mock_file_based, caplog):
