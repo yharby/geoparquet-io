@@ -49,7 +49,7 @@ geoparquet_io/
 - `import-linter`: Core cannot import Click; API cannot import CLI
 - `check-api-for-cli`: Reminds to add Python API for new CLI commands
 
-<!-- freshness: last-verified: 2026-03-31, maps-to: geoparquet_io/cli/main.py -->
+<!-- freshness: last-verified: 2026-04-03, maps-to: geoparquet_io/cli/main.py -->
 <!-- BEGIN GENERATED: cli-commands -->
 ### CLI Command Groups
 
@@ -131,7 +131,7 @@ Additional patterns (not yet enforced):
 
 ---
 
-<!-- freshness: last-verified: 2026-04-02, maps-to: pyproject.toml -->
+<!-- freshness: last-verified: 2026-04-03, maps-to: pyproject.toml -->
 ## Testing
 
 Config in `pyproject.toml [tool.pytest.ini_options]`. Coverage: 67% minimum (enforced).

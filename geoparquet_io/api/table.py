@@ -2033,11 +2033,19 @@ class Table:
 
     def check_spatial_pushdown(self) -> CheckResult:
         """
-        Check spatial filter pushdown readiness.
+        Check spatial filter pushdown readiness (prospective).
 
-        Evaluates whether the file supports efficient spatial filter pushdown
-        by analyzing per-row-group bbox statistics. Returns an estimated skip
-        rate representing how many row groups a typical regional query can skip.
+        Evaluates whether the table would support efficient spatial filter
+        pushdown by writing to a temp file and analyzing per-row-group bbox
+        statistics. Returns an estimated skip rate representing how many row
+        groups a typical regional query can skip.
+
+        Note:
+            This method writes the table to a temporary file with default
+            settings to compute metrics. For metrics on an existing file's
+            actual row group structure, use the CLI command
+            ``gpio check spatial --file`` or the standalone function
+            ``geoparquet_io.check_spatial_pushdown(file_path)``.
 
         Returns:
             CheckResult with pushdown readiness metrics

@@ -520,9 +520,9 @@ def check_spatial_pushdown_readiness(
             "num_row_groups": num_rgs,
             "estimated_skip_rate": 0.0,
             "avg_bbox_area_ratio": 0.0,
-            "passed": True,
-            "issues": [],
-            "recommendations": [],
+            "passed": False,  # Can't skip any row groups with only 0-1 row groups
+            "issues": ["Single row group provides no pushdown benefit"],
+            "recommendations": ["Consider using smaller row groups for spatial queries"],
         }
 
     extent = _compute_data_extent(row_group_bboxes)
