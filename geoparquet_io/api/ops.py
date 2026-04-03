@@ -857,3 +857,40 @@ def compression_stats(path: str) -> list[dict]:
     from geoparquet_io.core.duckdb_metadata import get_compression_stats
 
     return get_compression_stats(str(path))
+
+
+def explain_analyze(
+    file_path: str,
+    query: str | None = None,
+) -> dict:
+    """
+    Run EXPLAIN ANALYZE on a DuckDB query against a Parquet file.
+
+    Shows per-operator timing, cardinality, filter pushdown detection,
+    and row group pruning analysis.
+
+    Args:
+        file_path: Path to the input Parquet file.
+        query: Optional SQL query. Use {file} as placeholder for the file path.
+               Defaults to SELECT * FROM read_parquet('{file}').
+
+    Returns:
+        Dictionary with operators, timing, and analysis results.
+
+    Example:
+        >>> from geoparquet_io.api import ops
+        >>> result = ops.explain_analyze('input.parquet')
+        >>> for op in result['operators']:
+        ...     print(f"{op['name']}: {op['timing']:.6f}s")
+        >>> # With a custom query:
+        >>> result = ops.explain_analyze(
+        ...     'input.parquet',
+        ...     query="SELECT * FROM read_parquet('{file}') WHERE id > 10"
+        ... )
+    """
+    from geoparquet_io.core.benchmark import explain_analyze as _explain_analyze
+
+    return _explain_analyze(
+        file_path=file_path,
+        query=query,
+    )

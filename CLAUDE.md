@@ -56,7 +56,7 @@ geoparquet_io/
 | Command Group | Subcommands | Description |
 |---------------|-------------|-------------|
 | `gpio add` | a5, admin-divisions, bbox, bbox-metadata, h3, kdtree, quadkey, s2 | Commands for enhancing GeoParquet files in various ways |
-| `gpio benchmark` | compare, report, suite | Benchmark GeoParquet performance |
+| `gpio benchmark` | compare, explain, report, suite | Benchmark GeoParquet performance |
 | `gpio check` | all, bbox, compression, optimization, row-group, spatial, spec, stac | Check GeoParquet files for best practices |
 | `gpio convert` | csv, flatgeobuf, geojson, geopackage, geoparquet, reproject, shapefile | Convert between formats and coordinate systems |
 | `gpio extract` | arcgis, bigquery, geoparquet, wfs | Extract data from files and services to GeoParquet |
@@ -84,7 +84,6 @@ geoparquet_io/
 | `extract_bigquery.py` |  | 934 |
 | `partition_common.py` |  | 908 |
 | `admin_datasets.py` |  | 735 |
-| `benchmark.py` | Benchmark utilities for comparing GeoParquet conve... | 701 |
 | `partition_admin_hierarchical.py` |  | 698 |
 | `upload.py` | Upload GeoParquet files to cloud object storage. | 675 |
 | ... | *39 more modules* | |
