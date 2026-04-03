@@ -415,7 +415,7 @@ def display_metadata(
     )
 
     if geo_stats:
-        format_row_group_geo_stats(parquet_file, json_output)
+        format_row_group_geo_stats(parquet_file, json_output, row_groups)
         return
 
     # Count how many specific flags were set

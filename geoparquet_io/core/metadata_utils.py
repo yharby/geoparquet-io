@@ -1077,45 +1077,64 @@ def format_all_metadata(
         format_geoparquet_metadata(parquet_file, False)
 
 
-def format_row_group_geo_stats(parquet_file: str, json_output: bool = False) -> None:
+def format_row_group_geo_stats(
+    parquet_file: str, json_output: bool = False, row_groups: int | None = None
+) -> None:
     """
     Format and display per-row-group geo_bbox statistics.
 
     Shows a table with row_group_id, num_rows, xmin, ymin, xmax, ymax for
     each row group. Useful for verifying spatial locality after Hilbert sorting.
 
+    Tries native Parquet geo stats first (GeoParquet 2.0), then falls back to
+    bbox column statistics if no native stats are available.
+
     Args:
         parquet_file: Path to the parquet file
         json_output: Whether to output as JSON
+        row_groups: Limit output to first N row groups (None = all)
     """
     from geoparquet_io.core.duckdb_metadata import (
         get_file_metadata,
         get_per_row_group_bbox_stats,
+        get_per_row_group_native_geo_stats,
         has_bbox_column,
     )
 
     safe_url = safe_file_url(parquet_file, verbose=False)
-    has_bbox, bbox_col_name = has_bbox_column(safe_url)
 
-    if not has_bbox or not bbox_col_name:
+    # Try native geo stats first (GeoParquet 2.0 / parquet-geo-only)
+    rg_stats = get_per_row_group_native_geo_stats(safe_url)
+
+    # Fall back to bbox column if no native stats
+    if not rg_stats:
+        has_bbox, bbox_col_name = has_bbox_column(safe_url)
+        if has_bbox and bbox_col_name:
+            rg_stats = get_per_row_group_bbox_stats(safe_url, bbox_col_name)
+
+    if not rg_stats:
         if json_output:
-            print(json.dumps({"row_group_geo_stats": [], "message": "No bbox column found"}))
+            print(json.dumps({"row_group_geo_stats": [], "message": "No geo stats found"}))
         else:
             console = Console()
             console.print()
             console.print("[bold]Per-Row-Group geo_bbox Statistics[/bold]")
             console.print("━" * 60)
-            console.print("[yellow]No bbox column found in this file.[/yellow]")
-            console.print("[dim]Add a bbox column with: gpio add bbox <file>[/dim]")
+            console.print("[yellow]No geo statistics found in this file.[/yellow]")
+            console.print("[dim]For native stats: use GeoParquet 2.0 or parquet-geo-only[/dim]")
+            console.print("[dim]For bbox column: gpio add bbox <file>[/dim]")
             console.print()
         return
 
-    rg_stats = get_per_row_group_bbox_stats(safe_url, bbox_col_name)
     file_meta = get_file_metadata(safe_url)
     num_rows_per_rg = _get_num_rows_per_row_group(safe_url, file_meta)
 
     # Merge num_rows into stats
     stats_with_rows = _merge_row_counts(rg_stats, num_rows_per_rg)
+
+    # Apply row_groups limit if specified
+    if row_groups is not None:
+        stats_with_rows = stats_with_rows[:row_groups]
 
     if json_output:
         print(json.dumps({"row_group_geo_stats": stats_with_rows}, indent=2))

@@ -1167,6 +1167,63 @@ def get_aggregated_native_geo_stats(parquet_file: str, geometry_column: str, con
             connection.close()
 
 
+def get_per_row_group_native_geo_stats(
+    parquet_file: str, geometry_column: str | None = None, con=None
+) -> list[dict]:
+    """
+    Get per-row-group native Parquet geo_bbox statistics.
+
+    Works with GeoParquet 2.0 / parquet-geo-only files that store geo_bbox
+    in native Parquet column statistics (no separate bbox column needed).
+
+    Args:
+        parquet_file: Path to the parquet file
+        geometry_column: Name of the geometry column (auto-detected if None)
+        con: Optional existing DuckDB connection
+
+    Returns:
+        List of dicts with row_group_id, xmin, ymin, xmax, ymax (empty if no stats)
+    """
+    safe_url = _safe_url(parquet_file)
+    connection, should_close = _get_connection_for_file(parquet_file, con)
+
+    try:
+        # Auto-detect geometry column if not specified
+        if not geometry_column:
+            geometry_column = find_primary_geometry_column_duckdb(parquet_file, con)
+
+        result = connection.execute(f"""
+            SELECT
+                row_group_id,
+                geo_bbox.xmin as xmin,
+                geo_bbox.ymin as ymin,
+                geo_bbox.xmax as xmax,
+                geo_bbox.ymax as ymax
+            FROM parquet_metadata('{safe_url}')
+            WHERE path_in_schema = '{geometry_column}'
+              AND geo_bbox IS NOT NULL
+              AND geo_bbox.xmin IS NOT NULL
+            ORDER BY row_group_id
+        """).fetchall()
+
+        return [
+            {
+                "row_group_id": row[0],
+                "xmin": row[1],
+                "ymin": row[2],
+                "xmax": row[3],
+                "ymax": row[4],
+            }
+            for row in result
+        ]
+
+    except Exception:
+        return []
+    finally:
+        if should_close:
+            connection.close()
+
+
 def _format_geo_types(geo_types: list) -> list[str]:
     """
     Format geo_types from parquet_metadata into human-readable strings.

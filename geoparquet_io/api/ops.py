@@ -788,17 +788,21 @@ def get_row_group_geo_stats(parquet_file: str) -> list[dict]:
     xmax, ymax for each row group. Useful for verifying spatial locality
     after Hilbert sorting.
 
+    Tries native Parquet geo stats first (GeoParquet 2.0 / parquet-geo-only),
+    then falls back to bbox column statistics if no native stats are available.
+
     Args:
         parquet_file: Path to the parquet file
 
     Returns:
         List of dicts with per-row-group bbox statistics.
-        Empty list if the file has no bbox column.
+        Empty list if no geo stats are available.
     """
     from geoparquet_io.core.common import safe_file_url
     from geoparquet_io.core.duckdb_metadata import (
         get_file_metadata,
         get_per_row_group_bbox_stats,
+        get_per_row_group_native_geo_stats,
         has_bbox_column,
     )
     from geoparquet_io.core.metadata_utils import (
@@ -807,12 +811,19 @@ def get_row_group_geo_stats(parquet_file: str) -> list[dict]:
     )
 
     safe_url = safe_file_url(parquet_file, verbose=False)
-    has_bbox, bbox_col_name = has_bbox_column(safe_url)
 
-    if not has_bbox or not bbox_col_name:
+    # Try native geo stats first (GeoParquet 2.0 / parquet-geo-only)
+    rg_stats = get_per_row_group_native_geo_stats(safe_url)
+
+    # Fall back to bbox column if no native stats
+    if not rg_stats:
+        has_bbox, bbox_col_name = has_bbox_column(safe_url)
+        if has_bbox and bbox_col_name:
+            rg_stats = get_per_row_group_bbox_stats(safe_url, bbox_col_name)
+
+    if not rg_stats:
         return []
 
-    rg_stats = get_per_row_group_bbox_stats(safe_url, bbox_col_name)
     file_meta = get_file_metadata(safe_url)
     num_rows_per_rg = _get_num_rows_per_row_group(safe_url, file_meta)
 

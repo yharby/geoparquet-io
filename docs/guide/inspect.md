@@ -191,6 +191,44 @@ This shows metadata from the Parquet specification for geospatial types:
 
 **Note:** This is different from `--geo-metadata` which shows GeoParquet metadata from the 'geo' key.
 
+## Per-Row-Group Geo Statistics
+
+View bounding box statistics for each row group to verify spatial locality:
+
+=== "CLI"
+
+    ```bash
+    # Show per-row-group geo_bbox statistics
+    gpio inspect meta data.parquet --geo-stats
+
+    # Limit to first 5 row groups
+    gpio inspect meta data.parquet --geo-stats --row-groups 5
+
+    # JSON output
+    gpio inspect meta data.parquet --geo-stats --json
+    ```
+
+=== "Python"
+
+    ```python
+    from geoparquet_io import get_row_group_geo_stats
+
+    stats = get_row_group_geo_stats('hilbert_sorted.parquet')
+
+    for rg in stats:
+        print(f"RG {rg['row_group_id']}: {rg['num_rows']} rows, "
+              f"bbox=[{rg['xmin']:.2f}, {rg['ymin']:.2f}, "
+              f"{rg['xmax']:.2f}, {rg['ymax']:.2f}]")
+    ```
+
+This is useful for:
+
+- Verifying spatial locality after Hilbert sorting
+- Checking that row groups have tight bounding boxes
+- Debugging spatial filter pushdown performance
+
+**Stats Sources:** Works with native Parquet geo statistics (GeoParquet 2.0, parquet-geo-only) and bbox column statistics.
+
 ## Listing Layers
 
 For multi-layer formats (GeoPackage, FileGDB), list available layers:

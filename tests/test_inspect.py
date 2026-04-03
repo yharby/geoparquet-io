@@ -869,12 +869,13 @@ class TestInspectSubcommands:
             assert "ymax" in first
 
     def test_inspect_meta_geo_stats_no_bbox(self, runner):
-        """Test --geo-stats on file without bbox shows informative message."""
+        """Test --geo-stats on file without bbox/native stats shows informative message."""
         no_bbox_file = os.path.join(os.path.dirname(__file__), "data", "buildings_test.parquet")
         result = runner.invoke(cli, ["inspect", "meta", no_bbox_file, "--geo-stats"])
 
         assert result.exit_code == 0
-        assert "No bbox column" in result.output or "no geo_bbox" in result.output.lower()
+        # Should indicate no geo stats available (native or bbox column)
+        assert "No geo statistics found" in result.output or "no geo" in result.output.lower()
 
     def test_inspect_meta_without_geo_stats_unchanged(self, runner, test_file):
         """Test that without --geo-stats the output does not include the geo stats table."""
