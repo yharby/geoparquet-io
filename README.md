@@ -1,13 +1,24 @@
 # geoparquet-io
 
 [![Tests](https://github.com/geoparquet/geoparquet-io/actions/workflows/tests.yml/badge.svg)](https://github.com/geoparquet/geoparquet-io/actions/workflows/tests.yml)
-[![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://github.com/geoparquet/geoparquet-io)
+[![codecov](https://codecov.io/gh/geoparquet/geoparquet-io/branch/main/graph/badge.svg)](https://codecov.io/gh/geoparquet/geoparquet-io)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![PyPI version](https://badge.fury.io/py/geoparquet-io.svg)](https://badge.fury.io/py/geoparquet-io)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/geoparquet/geoparquet-io/blob/main/LICENSE)
-[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-Fast I/O and transformation tools for GeoParquet files using PyArrow and DuckDB.
+`geoparquet-io` (or `gpio`) offers a CLI and a fluent Python API to help you create, validate, and optimize GeoParquet files. It is written in Python and uses DuckDB (with GDAL embedded for legacy format support), PyArrow, and `obstore` for fast operations on larger-than-memory datasets. By default, gpio enforces best practices: bbox columns, Hilbert ordering, ZSTD compression, and smart row group sizes. Additional features include:
+- Unix pipes with Arrow IPC streaming
+- Read and write to S3, GCS, Azure, HTTPS, etc.
+- Easily add spatial indices (bbox, H3, quadkey, S2, A5, KD-tree)
+- Support for GeoParquet 1.1 and 2.0
+- bbox-based subsetting of datasets for spatial filtering and extraction
+- Service extraction from ArcGIS Feature Services, BigQuery tables, and WFS → GeoParquet
+- Easy inspection of metadata, row previews, and statistics
+- PMTiles generation via the gpio-pmtiles plugin
+- A Claude Code skill for AI-assisted spatial data workflows
 
-**[Documentation](https://geoparquet.io/)** · **[Quick Start](https://geoparquet.io/getting-started/quickstart/)** · **[Python API](https://geoparquet.io/api/python-api/)**
+**[Documentation](https://geoparquet.io/)** · **[Quick Start](https://geoparquet.io/getting-started/quickstart/)** · **[Python API](https://geoparquet.io/api/python-api/)**  · **[Contributing](https://geoparquet.io/contributing/)**
 
 ## Installation
 
@@ -15,42 +26,63 @@ Fast I/O and transformation tools for GeoParquet files using PyArrow and DuckDB.
 uv tool install geoparquet-io    # CLI tool (recommended)
 uv add geoparquet-io             # Python library
 ```
+See [Installation Guide](https://geoparquet.io/getting-started/installation/) for more details.
 
-See [Installation Guide](https://geoparquet.io/getting-started/installation/) for pip, plugins, and other options.
+## Quick Examples
 
-## Quick Example
+With `gpio convert`, you can seamlessly convert from (and to) legacy formats like Shapefiles, GeoJSON, and GeoPackages:
+```bash
+# One command: converts, adds bbox, Hilbert-sorts, compresses
+gpio convert buildings.shp buildings.parquet
+```
+
+One of `gpio`’s strengths is composability. On the CLI, commands chain together with Unix pipes using Arrow IPC streaming—no intermediate files:
 
 ```bash
-gpio inspect myfile.parquet                      # View metadata
-gpio check all myfile.parquet                    # Validate best practices
-gpio add bbox input.parquet output.parquet       # Add spatial index
-gpio sort hilbert input.parquet sorted.parquet   # Optimize for queries
+# Extract Senegal from global admin boundaries, Hilbert-sort
+gpio extract --bbox "-18,14,-11,18" \
+  https://data.fieldmaps.io/edge-matched/humanitarian/intl/adm2_polygons.parquet | \
+  gpio sort hilbert - senegal_adm2.parquet
 ```
+
+```bash
+# Chain enrichment steps together
+gpio add bbox input.parquet | \
+  gpio add h3 --resolution 9 - | \
+  gpio sort hilbert - enriched.parquet
+```
+
+The Python API mirrors this with a fluent interface:
 
 ```python
 import geoparquet_io as gpio
 
-gpio.read('input.parquet').add_bbox().sort_hilbert().write('output.parquet')
+gpio.read('buildings.parquet') \
+    .add_bbox() \
+    .add_h3(resolution=9) \
+    .sort_hilbert() \
+    .write('s3://bucket/optimized.parquet')
 ```
 
+Cloud I/O is handled automatically via DuckDB and `obstore`, so commands like this just work:
+```bash
+# Convert shapefile → auto-partition by H3 → write directly to S3
+gpio convert large_roads.shp | \
+  gpio partition h3 - s3://bucket/roads/ --auto --hive --profile prod
+```
 See the [User Guide](https://geoparquet.io/guide/inspect/) for spatial indexing, partitioning, cloud storage, and more.
 
-## Features
+### For Development
 
-- **Fast** — PyArrow and DuckDB backend
-- **Pipeable** — Unix pipes with Arrow IPC streaming
-- **Cloud-native** — S3, GCS, Azure, HTTPS
-- **Spatial indices** — bbox, H3, quadkey, S2, A5, KD-tree
-- **GeoParquet 1.1 & 2.0** — Best practices enforcement
-- **CLI + Python API** — Fluent Table interface
+```bash
+git clone https://github.com/geoparquet/geoparquet-io.git
+cd geoparquet-io
+uv sync --all-extras
+uv run geoparquet-io --help
+```
 
-## Links
-
-- [CLI Reference](https://geoparquet.io/cli/overview/)
-- [Contributing](https://geoparquet.io/contributing/)
-- [PyPI](https://pypi.org/project/geoparquet-io/)
-- [Issues](https://github.com/geoparquet/geoparquet-io/issues)
+See [Contributing Guide](https://geoparquet.io/contributing/) for full development setup.
 
 ## License
 
-Apache 2.0 — See [LICENSE](LICENSE)
+[Apache 2.0](LICENSE)

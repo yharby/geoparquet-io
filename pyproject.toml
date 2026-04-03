@@ -85,6 +85,7 @@ docs = [
     "mkdocs>=1.5.0",
     "mkdocs-material>=9.5.0",
     "mkdocstrings[python]>=0.24.0",
+    "pymdown-extensions>=10.18",  # Fix: 10.17.1 has filename=None bug with pygments
 ]
 benchmark = [
     "geopandas>=0.14.0",

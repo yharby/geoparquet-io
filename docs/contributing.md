@@ -80,7 +80,7 @@ export ENABLE_PRE_PUSH_TESTS=1  # Enable fast tests before push
 
 **Enforced by commitizen hook.** Use [Conventional Commits](https://www.conventionalcommits.org/):
 
-```
+```text
 <type>(scope): description
 ```
 
@@ -94,7 +94,7 @@ export ENABLE_PRE_PUSH_TESTS=1  # Enable fast tests before push
 | `chore` | Maintenance tasks |
 
 **Examples:**
-```
+```text
 feat(convert): Add streaming mode for large files
 fix(bbox): Correct metadata format for GeoParquet 1.1
 docs(readme): Update installation instructions

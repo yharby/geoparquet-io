@@ -85,13 +85,6 @@
       "reviewed_by": "Claude"
     },
     {
-      "code_file": "scripts/doc_sync.py",
-      "doc_target": "CLAUDE.md",
-      "reviewed_at": "2026-04-02T16:35:33.811218+00:00",
-      "code_commit_at_review": "3051d19",
-      "reviewed_by": "Claude"
-    },
-    {
       "code_file": "geoparquet_io/skills/__init__.py",
       "doc_target": "docs/guide/llm-integration.md",
       "reviewed_at": "2026-04-02T19:37:26.225040+00:00",
@@ -107,10 +100,17 @@
     },
     {
       "code_file": "scripts/doc_sync.py",
+      "doc_target": "CLAUDE.md",
+      "reviewed_at": "2026-04-03T09:05:36.155337+00:00",
+      "code_commit_at_review": "56d2c60",
+      "reviewed_by": "Claude"
+    },
+    {
+      "code_file": "scripts/doc_sync.py",
       "doc_target": "geoparquet_io/skills/geoparquet.md",
-      "reviewed_at": "2026-04-03T05:50:53.782423+00:00",
-      "code_commit_at_review": "5906d11",
-      "reviewed_by": "user"
+      "reviewed_at": "2026-04-03T09:05:36.252265+00:00",
+      "code_commit_at_review": "56d2c60",
+      "reviewed_by": "Claude"
     }
   ]
 }
