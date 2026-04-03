@@ -129,6 +129,41 @@ Verifies:
 
 Checks row group size optimization for cloud-native access.
 
+### Spec Validation
+
+=== "CLI"
+
+    ```bash
+    # Auto-detect version
+    gpio check spec data.parquet
+
+    # Validate against specific version
+    gpio check spec data.parquet --geoparquet-version 1.1
+
+    # JSON output for CI/CD
+    gpio check spec data.parquet --json
+    ```
+
+=== "Python"
+
+    ```python
+    result = table.check_spec()
+    if result.passed():
+        print("Valid GeoParquet!")
+    ```
+
+Validates file structure and metadata against the GeoParquet specification:
+
+- Supports GeoParquet 1.0, 1.1, 2.0, and Parquet native geo types
+- Auto-detects version unless `--geoparquet-version` is specified
+- Optional data validation against metadata claims
+
+**Exit codes:**
+
+- `0` - All checks passed
+- `1` - One or more checks failed
+- `2` - Warnings only (all required checks passed)
+
 ### STAC Validation
 
 === "CLI"

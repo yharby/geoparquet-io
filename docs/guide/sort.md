@@ -15,7 +15,7 @@ The `sort` command reorders GeoParquet files for optimal performance and query e
     gpio sort hilbert input.parquet output.parquet
 
     # From HTTPS to S3
-    gpio sort hilbert https://example.com/data.parquet s3://bucket/sorted.parquet --profile prod
+    gpio sort hilbert https://example.com/data.parquet s3://bucket/sorted.parquet --aws-profile prod
     ```
 
 === "Python"

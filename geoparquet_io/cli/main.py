@@ -5513,6 +5513,65 @@ def check_spec(
         raise click.ClickException(str(e)) from e
 
 
+# Skills command (for LLM integration)
+@cli.command()
+@click.option("--show", is_flag=True, help="Print skill content to stdout")
+@click.option("--copy", "copy_to", type=click.Path(), help="Copy skill to directory")
+@click.option("--name", default="geoparquet", help="Skill name (default: geoparquet)")
+def skills(show: bool, copy_to: str | None, name: str):
+    """List and access LLM skills for gpio.
+
+    Skills are markdown files that help LLMs (ChatGPT, Claude, etc.) work
+    effectively with the gpio CLI tool.
+
+    \b
+    Examples:
+      gpio skills              # List available skills
+      gpio skills --show       # Print skill to stdout (for piping to LLM)
+      gpio skills --copy .     # Copy skill to current directory
+
+    \b
+    Using with LLMs:
+      # Paste skill content into a conversation
+      gpio skills --show | pbcopy
+
+      # Or reference the installed file
+      gpio skills  # Shows file path
+    """
+    from geoparquet_io.skills import get_skill_content, get_skill_path, list_skills
+
+    try:
+        if show:
+            # Print content to stdout
+            click.echo(get_skill_content(name))
+        elif copy_to:
+            # Copy skill to directory
+            from pathlib import Path
+            from shutil import copy2
+
+            dest_dir = Path(copy_to)
+            if not dest_dir.is_dir():
+                raise click.ClickException(f"Not a directory: {copy_to}")
+
+            src = get_skill_path(name)
+            dest = dest_dir / f"{name}.md"
+            copy2(src, dest)
+            click.echo(f"Copied skill to: {dest}")
+        else:
+            # List available skills
+            available = list_skills()
+            click.echo("Available gpio skills:\n")
+            for skill_name in available:
+                skill_path = get_skill_path(skill_name)
+                click.echo(f"  {skill_name}")
+                click.echo(f"    Path: {skill_path}")
+            click.echo("\nUsage:")
+            click.echo("  gpio skills --show       # Print to stdout")
+            click.echo("  gpio skills --copy .     # Copy to current directory")
+    except FileNotFoundError as e:
+        raise click.ClickException(str(e)) from e
+
+
 # Benchmark commands group
 @cli.group()
 @click.pass_context

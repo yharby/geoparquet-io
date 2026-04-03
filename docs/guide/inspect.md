@@ -191,6 +191,38 @@ This shows metadata from the Parquet specification for geospatial types:
 
 **Note:** This is different from `--geo-metadata` which shows GeoParquet metadata from the 'geo' key.
 
+## Listing Layers
+
+For multi-layer formats (GeoPackage, FileGDB), list available layers:
+
+=== "CLI"
+
+    ```bash
+    # List layers in GeoPackage
+    gpio inspect layers multi.gpkg
+
+    # List layers in FileGDB
+    gpio inspect layers data.gdb
+
+    # JSON output for scripting
+    gpio inspect layers multi.gpkg --json
+    ```
+
+=== "Python"
+
+    ```python
+    import geoparquet_io as gpio
+
+    # List layers in a multi-layer file
+    layers = gpio.list_layers('multi.gpkg')
+    print(layers)  # ['buildings', 'roads', 'parcels']
+
+    # Read a specific layer
+    table = gpio.read('multi.gpkg', layer='buildings')
+    ```
+
+Returns layer names for files with 2+ layers. Single-layer files return nothing.
+
 ## JSON Output
 
 ```bash
