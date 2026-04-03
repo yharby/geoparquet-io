@@ -399,6 +399,13 @@ def _check_geoparquet_v1(parquet_file, file_type_info, verbose, return_results, 
 
     passed = version >= "1.1.0" and not needs_bbox_column and not needs_bbox_metadata
 
+    # Always suggest v2.0 upgrade for v1.x files
+    recommendations.append(
+        "Consider upgrading to GeoParquet 2.0 for native spatial stats "
+        "and filter pushdown. Run: gpio convert geoparquet input.parquet "
+        "output.parquet --geoparquet-version 2.0"
+    )
+
     # Print results (skip if quiet mode)
     if not quiet:
         progress("\nGeoParquet Metadata:")
@@ -420,6 +427,11 @@ def _check_geoparquet_v1(parquet_file, file_type_info, verbose, return_results, 
                 )
         else:
             error("❌ No bbox column found (recommended for better performance)")
+
+        info(
+            "ℹ️  GeoParquet 2.0 is available, with native spatial stats and filter pushdown. "
+            "Run: gpio convert geoparquet input.parquet output.parquet --geoparquet-version 2.0"
+        )
 
     if return_results:
         return {
