@@ -38,6 +38,36 @@ repos:
   # -------------------------------------------------------------------------
   - repo: local
     hooks:
+      # Block DuckDB 1.5 anti-patterns that cause crashes
+      - id: duckdb-antipatterns
+        name: duckdb-antipatterns
+        description: Block DuckDB patterns that crash in 1.5+
+        entry: bash
+        args:
+          - -c
+          - |
+            errors=0
+            # fetch_arrow_table() crashes with TransactionContext error
+            # Exclude comments (lines starting with #) and docstrings
+            if grep -rn "\.fetch_arrow_table()" geoparquet_io/ --include="*.py" | grep -v "^\s*#" | grep -v "DuckDB 1.5"; then
+              echo "ERROR: Use .arrow().read_all() instead of .fetch_arrow_table() (crashes in DuckDB 1.5)"
+              errors=1
+            fi
+            # to_arrow_table() also crashes
+            if grep -rn "\.to_arrow_table()" geoparquet_io/ --include="*.py" | grep -v "^\s*#" | grep -v "DuckDB 1.5"; then
+              echo "ERROR: Use .arrow().read_all() instead of .to_arrow_table() (crashes in DuckDB 1.5)"
+              errors=1
+            fi
+            # TRY_CAST to GEOMETRY is broken - only match actual SQL, not comments
+            if grep -rn 'TRY_CAST.*AS GEOMETRY' geoparquet_io/ --include="*.py" | grep -v "^\s*#" | grep -v "DuckDB 1.5" | grep -v "instead of"; then
+              echo "ERROR: Use TRY(ST_GeomFromText(x)) instead of TRY_CAST(x AS GEOMETRY)"
+              errors=1
+            fi
+            exit $errors
+        language: system
+        pass_filenames: false
+        types: [python]
+
       # enforce logger usage over click.echo in core/
       - id: no-click-echo
         name: no-click-echo
