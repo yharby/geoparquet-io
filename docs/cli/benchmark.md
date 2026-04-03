@@ -7,6 +7,7 @@ Benchmark GeoParquet conversion and operation performance.
 | Subcommand | Description |
 |------------|-------------|
 | `compare` | Compare converter performance on a single file |
+| `explain` | Show DuckDB query plan analysis (EXPLAIN ANALYZE) |
 | `suite` | Run comprehensive benchmark suite |
 | `report` | View and compare benchmark results |
 
@@ -85,6 +86,70 @@ DuckDB                    29.751 +/- 0.443   0.0 +/- 0.0
 GeoPandas (PyOGRIO)       59.957 +/- 1.078   1196.7 +/- 0.0
 
 Fastest: DuckDB (29.751s)
+```
+
+## gpio benchmark explain
+
+Show DuckDB query plan analysis using EXPLAIN ANALYZE.
+
+### Quick Reference
+
+```bash
+gpio benchmark explain INPUT_FILE [OPTIONS]
+```
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--query, -q` | `SELECT *` | Custom SQL query (use `{file}` as placeholder) |
+| `--format` | table | Output format: `table` or `json` |
+| `--output, -o` | - | Save results to JSON file |
+
+### Examples
+
+```bash
+# Basic query plan analysis
+gpio benchmark explain input.parquet
+
+# JSON output
+gpio benchmark explain input.parquet --format json
+
+# Custom query with filter (to test pushdown)
+gpio benchmark explain input.parquet --query "SELECT * FROM read_parquet('{file}') WHERE id > 10"
+
+# Save to file
+gpio benchmark explain input.parquet --output plan.json
+```
+
+### Output
+
+The explain command shows:
+
+- **Operators**: Query plan operators with timing and row counts
+- **Filter pushdown**: Whether filters are pushed to the Parquet reader
+- **Row group pruning**: Whether row groups are skipped based on metadata
+
+#### Table Format (default)
+
+```
+======================================================================
+QUERY PLAN ANALYSIS
+======================================================================
+
+Operator                            Time (s)     Rows
+-----------------------------------------------------------
+PROJECTION                          0.000500     100
+  PARQUET_SCAN                      0.001000     100
+    File: input.parquet
+    Filters: id>10
+    Row Groups: 1/3
+
+Total time: 0.001500s
+
+Observations:
+  Filter pushdown: detected
+  Row group pruning: detected
 ```
 
 ## gpio benchmark suite

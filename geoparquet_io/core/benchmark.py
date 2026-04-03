@@ -23,6 +23,7 @@ import click
 import duckdb
 import psutil
 
+from geoparquet_io.core.common import get_duckdb_connection, needs_httpfs
 from geoparquet_io.core.logging_config import progress
 
 # Converter registry with detection functions
@@ -850,11 +851,16 @@ def format_explain_output(parsed: dict, output_format: str = "table") -> str:
     return _format_explain_table(parsed)
 
 
-def _get_explain_connection() -> duckdb.DuckDBPyConnection:
-    """Create a DuckDB connection configured for EXPLAIN ANALYZE."""
-    conn = duckdb.connect()
-    conn.execute("INSTALL spatial; LOAD spatial;")
-    conn.execute("SET geometry_always_xy = true;")
+def _get_explain_connection(file_path: str) -> duckdb.DuckDBPyConnection:
+    """Create a DuckDB connection configured for EXPLAIN ANALYZE.
+
+    Uses the shared get_duckdb_connection helper to ensure consistent
+    handling of local files and remote URLs (S3, HTTP, etc.).
+    """
+    conn = get_duckdb_connection(
+        load_spatial=True,
+        load_httpfs=needs_httpfs(file_path),
+    )
     conn.execute("SET enable_profiling = 'json';")
     conn.execute("SET profiling_output = '';")
     return conn
@@ -880,7 +886,7 @@ def explain_analyze(
     and detects filter pushdown and row group pruning.
 
     Args:
-        file_path: Path to the input Parquet file.
+        file_path: Path to the input Parquet file (local path or URL).
         query: Optional SQL query. Use {file} as placeholder for the file path.
                Defaults to SELECT * FROM read_parquet('{file}').
 
@@ -888,16 +894,12 @@ def explain_analyze(
         Parsed query plan dictionary with operators, timing, and analysis.
 
     Raises:
-        click.ClickException: If the file does not exist or query fails.
+        ValueError: If the file does not exist or query fails.
     """
-    path = Path(file_path)
-    if not path.exists():
-        raise click.ClickException(f"File not found: {file_path}")
-
-    conn = _get_explain_connection()
+    conn = _get_explain_connection(file_path)
 
     try:
-        explain_query = _build_explain_query(str(path), query)
+        explain_query = _build_explain_query(file_path, query)
         result = conn.execute(explain_query)
         rows = result.fetchall()
 
@@ -938,5 +940,11 @@ def explain_analyze(
         parsed["raw_plan"] = raw_plan
         return parsed
 
+    except duckdb.IOException as e:
+        # Convert DuckDB file errors to ValueError for cleaner API
+        raise ValueError(f"File not found or inaccessible: {file_path}") from e
+    except duckdb.Error as e:
+        # Convert other DuckDB errors to ValueError
+        raise ValueError(f"Query failed: {e}") from e
     finally:
         conn.close()

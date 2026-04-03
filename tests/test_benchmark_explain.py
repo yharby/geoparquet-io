@@ -5,7 +5,6 @@ Tests for benchmark explain (EXPLAIN ANALYZE) functionality.
 import json
 from pathlib import Path
 
-import click
 import pytest
 from click.testing import CliRunner
 
@@ -204,6 +203,7 @@ class TestFormatExplainOutput:
         assert data["has_filter_pushdown"] is False
 
 
+@pytest.mark.integration
 class TestExplainAnalyze:
     """Tests for the explain_analyze function."""
 
@@ -238,7 +238,7 @@ class TestExplainAnalyze:
 
     def test_explain_analyze_nonexistent_file(self):
         """Test explain_analyze with nonexistent file raises error."""
-        with pytest.raises(click.ClickException):
+        with pytest.raises(ValueError, match="File not found"):
             explain_analyze(
                 file_path="/nonexistent/file.parquet",
             )
@@ -252,6 +252,7 @@ class TestExplainAnalyze:
         assert "raw_plan" in result
 
 
+@pytest.mark.integration
 class TestExplainCLI:
     """Tests for benchmark explain CLI command."""
 
