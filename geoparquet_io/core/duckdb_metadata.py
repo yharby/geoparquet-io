@@ -991,6 +991,46 @@ def get_row_group_stats_summary(parquet_file: str, con=None) -> dict:
             connection.close()
 
 
+def get_bloom_filter_info(parquet_file: str, con=None) -> list[dict]:
+    """
+    Get bloom filter information for all columns in a parquet file.
+
+    Queries parquet_metadata() for bloom_filter_offset and bloom_filter_length
+    to determine which columns have bloom filters and their coverage.
+
+    Returns list of dicts sorted by bloom filter presence (filtered columns first),
+    each containing:
+        - column_name: Name of the column
+        - row_groups: Total number of row groups
+        - row_groups_with_bloom_filter: Number of row groups with a bloom filter
+        - bloom_filter_coverage_pct: Percentage of row groups with bloom filters
+        - total_bloom_filter_bytes: Total size of bloom filter data in bytes
+    """
+    safe_url = _safe_url(parquet_file)
+    connection, should_close = _get_connection_for_file(parquet_file, con, load_spatial=False)
+
+    try:
+        result = connection.execute(f"""
+            SELECT
+                path_in_schema AS column_name,
+                COUNT(*) AS row_groups,
+                COUNT(bloom_filter_offset) AS row_groups_with_bloom_filter,
+                ROUND(
+                    100.0 * COUNT(bloom_filter_offset) / COUNT(*), 1
+                ) AS bloom_filter_coverage_pct,
+                COALESCE(SUM(bloom_filter_length), 0) AS total_bloom_filter_bytes
+            FROM parquet_metadata('{safe_url}')
+            GROUP BY path_in_schema
+            ORDER BY row_groups_with_bloom_filter DESC, path_in_schema
+        """).fetchall()
+
+        columns = [desc[0] for desc in connection.description]
+        return [dict(zip(columns, row, strict=True)) for row in result]
+    finally:
+        if should_close:
+            connection.close()
+
+
 def get_column_stats(parquet_file: str, column_name: str, con=None) -> list[dict]:
     """
     Get per-row-group statistics for a specific column.

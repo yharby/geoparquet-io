@@ -521,6 +521,7 @@ def _format_parquet_metadata_json(
     rg_columns: dict,
     geo_columns: dict,
     row_groups_limit: int | None,
+    bloom_filter_info: list | None = None,
 ) -> None:
     """Output Parquet metadata as JSON."""
     num_rows = file_meta.get("num_rows", 0)
@@ -544,6 +545,17 @@ def _format_parquet_metadata_json(
         cols_in_rg = rg_columns.get(i, [])
         rg_dict = _build_row_group_json(i, cols_in_rg, geo_columns)
         metadata_dict["row_groups"].append(rg_dict)
+
+    # Add bloom filter info
+    if bloom_filter_info:
+        columns_with = [
+            entry for entry in bloom_filter_info if entry["row_groups_with_bloom_filter"] > 0
+        ]
+        metadata_dict["bloom_filters"] = {
+            "columns_with_bloom_filters": len(columns_with),
+            "total_columns": len(bloom_filter_info),
+            "details": bloom_filter_info,
+        }
 
     print(json.dumps(metadata_dict, indent=2))
 
@@ -585,6 +597,43 @@ def _print_row_group_table(console: Console, cols_in_rg: list, geo_columns: dict
     console.print(table)
 
 
+def _print_bloom_filter_summary(console: Console, bloom_filter_info: list | None) -> None:
+    """Print bloom filter summary for inspect meta output."""
+    if not bloom_filter_info:
+        return
+
+    columns_with = [
+        entry for entry in bloom_filter_info if entry["row_groups_with_bloom_filter"] > 0
+    ]
+
+    console.print()
+    console.print("[bold]Bloom Filters:[/bold]")
+
+    if not columns_with:
+        console.print("  [dim]No bloom filters detected[/dim]")
+        return
+
+    total_bytes = sum(entry["total_bloom_filter_bytes"] for entry in columns_with)
+    console.print(
+        f"  {len(columns_with)} of {len(bloom_filter_info)} column(s) "
+        f"have bloom filters ({format_size(total_bytes)} total)"
+    )
+
+    table = Table(show_header=True, header_style="bold", box=None, padding=(0, 1))
+    table.add_column("Column", style="white")
+    table.add_column("Coverage", style="green", justify="right")
+    table.add_column("Size", style="yellow", justify="right")
+
+    for entry in columns_with:
+        table.add_row(
+            entry["column_name"],
+            f"{entry['bloom_filter_coverage_pct']:.0f}%",
+            format_size(entry["total_bloom_filter_bytes"]),
+        )
+
+    console.print(table)
+
+
 def _format_parquet_metadata_terminal(
     file_meta: dict,
     num_columns: int,
@@ -592,6 +641,7 @@ def _format_parquet_metadata_terminal(
     rg_columns: dict,
     geo_columns: dict,
     row_groups_limit: int | None,
+    bloom_filter_info: list | None = None,
 ) -> None:
     """Output Parquet metadata as human-readable terminal output."""
     console = Console()
@@ -631,6 +681,9 @@ def _format_parquet_metadata_terminal(
         console.print(f"  [dim]... and {remaining} more row group(s)[/dim]")
         console.print(f"  [dim]Use --row-groups {num_row_groups} to see all row groups[/dim]")
 
+    # Bloom filter summary
+    _print_bloom_filter_summary(console, bloom_filter_info)
+
     console.print()
 
 
@@ -651,6 +704,7 @@ def format_parquet_metadata_enhanced(
     """
     from geoparquet_io.core.duckdb_metadata import (
         detect_geometry_columns,
+        get_bloom_filter_info,
         get_file_metadata,
         get_row_group_metadata,
         get_schema_info,
@@ -662,6 +716,7 @@ def format_parquet_metadata_enhanced(
     schema_info = get_schema_info(safe_url)
     row_group_meta = get_row_group_metadata(safe_url)
     geo_columns = detect_geometry_columns(safe_url)
+    bloom_filter_info = get_bloom_filter_info(safe_url)
 
     num_columns = len([c for c in schema_info if c.get("name") and "." not in c.get("name", "")])
     schema_str = ", ".join(
@@ -679,11 +734,23 @@ def format_parquet_metadata_enhanced(
 
     if json_output:
         _format_parquet_metadata_json(
-            file_meta, num_columns, schema_str, rg_columns, geo_columns, row_groups_limit
+            file_meta,
+            num_columns,
+            schema_str,
+            rg_columns,
+            geo_columns,
+            row_groups_limit,
+            bloom_filter_info,
         )
     else:
         _format_parquet_metadata_terminal(
-            file_meta, num_columns, schema_str, rg_columns, geo_columns, row_groups_limit
+            file_meta,
+            num_columns,
+            schema_str,
+            rg_columns,
+            geo_columns,
+            row_groups_limit,
+            bloom_filter_info,
         )
 
 

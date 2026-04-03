@@ -574,6 +574,77 @@ def check_compression(parquet_file, verbose=False, return_results=False, quiet=F
         return results
 
 
+def check_bloom_filters(parquet_file, verbose=False, return_results=False, quiet=False):
+    """Check bloom filter presence on columns.
+
+    Bloom filters enable efficient point lookups on low-cardinality columns
+    (city names, land use types, integer ranges). DuckDB 1.5+ automatically
+    writes bloom filters for eligible columns.
+
+    Args:
+        parquet_file: Path to parquet file
+        verbose: Print additional information
+        return_results: If True, return structured results dict
+        quiet: If True, suppress all output (for multi-file batch mode)
+
+    Returns:
+        dict if return_results=True, containing:
+            - passed: bool (always True, bloom filters are informational)
+            - has_bloom_filters: bool
+            - columns_with_bloom_filters: list of column names
+            - columns_without_bloom_filters: list of column names
+            - bloom_filter_details: list of per-column bloom filter info
+    """
+    from geoparquet_io.core.duckdb_metadata import get_bloom_filter_info
+
+    bloom_info = get_bloom_filter_info(parquet_file)
+
+    columns_with = [
+        entry["column_name"] for entry in bloom_info if entry["row_groups_with_bloom_filter"] > 0
+    ]
+    columns_without = [
+        entry["column_name"] for entry in bloom_info if entry["row_groups_with_bloom_filter"] == 0
+    ]
+    has_bloom = len(columns_with) > 0
+
+    total_bloom_bytes = sum(entry["total_bloom_filter_bytes"] for entry in bloom_info)
+
+    results = {
+        "passed": True,
+        "has_bloom_filters": has_bloom,
+        "columns_with_bloom_filters": columns_with,
+        "columns_without_bloom_filters": columns_without,
+        "bloom_filter_details": bloom_info,
+        "total_bloom_filter_bytes": total_bloom_bytes,
+    }
+
+    if not quiet:
+        progress("\nBloom Filter Analysis:")
+        if has_bloom:
+            success(
+                f"Bloom filters found on {len(columns_with)} column(s): {', '.join(columns_with)}"
+            )
+            info(f"Total bloom filter size: {format_size(total_bloom_bytes)}")
+            if verbose:
+                for entry in bloom_info:
+                    if entry["row_groups_with_bloom_filter"] > 0:
+                        info(
+                            f"  {entry['column_name']}: "
+                            f"{entry['bloom_filter_coverage_pct']}% coverage, "
+                            f"{format_size(entry['total_bloom_filter_bytes'])}"
+                        )
+        else:
+            info("No bloom filters detected")
+            if verbose:
+                info(
+                    "Bloom filters speed up point lookups on low-cardinality columns "
+                    "(e.g., city names, categories)"
+                )
+
+    if return_results:
+        return results
+
+
 def check_all(
     parquet_file,
     verbose=False,
@@ -597,12 +668,16 @@ def check_all(
     )
     bbox_result = check_metadata_and_bbox(parquet_file, verbose, return_results=True, quiet=quiet)
     compression_result = check_compression(parquet_file, verbose, return_results=True, quiet=quiet)
+    bloom_filter_result = check_bloom_filters(
+        parquet_file, verbose, return_results=True, quiet=quiet
+    )
 
     if return_results:
         return {
             "row_groups": row_groups_result,
             "bbox": bbox_result,
             "compression": compression_result,
+            "bloom_filters": bloom_filter_result,
         }
 
 

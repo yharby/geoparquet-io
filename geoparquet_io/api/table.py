@@ -2136,6 +2136,29 @@ class Table:
         )
         return CheckResult(results, check_type="row_groups")
 
+    def check_bloom_filters(self) -> CheckResult:
+        """
+        Check bloom filter presence on columns.
+
+        Bloom filters enable efficient point lookups on low-cardinality columns
+        (city names, land use types, integer ranges).
+
+        Returns:
+            CheckResult with bloom filter analysis
+
+        Example:
+            >>> table = gpio.read('data.parquet')
+            >>> result = table.check_bloom_filters()
+            >>> print(result.to_dict())
+        """
+        from geoparquet_io.api.check import CheckResult
+        from geoparquet_io.core.check_parquet_structure import check_bloom_filters
+
+        results = self._with_temp_file(
+            check_bloom_filters, verbose=False, return_results=True, quiet=True
+        )
+        return CheckResult(results, check_type="bloom_filters")
+
     def validate(self, version: str | None = None) -> CheckResult:
         """
         Validate against GeoParquet specification.
