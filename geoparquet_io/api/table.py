@@ -2031,6 +2031,41 @@ class Table:
         )
         return CheckResult(results, check_type="spatial")
 
+    def check_spatial_pushdown(self) -> CheckResult:
+        """
+        Check spatial filter pushdown readiness (prospective).
+
+        Evaluates whether the table would support efficient spatial filter
+        pushdown by writing to a temp file and analyzing per-row-group bbox
+        statistics. Returns an estimated skip rate representing how many row
+        groups a typical regional query can skip.
+
+        Note:
+            This method writes the table to a temporary file with default
+            settings to compute metrics. For metrics on an existing file's
+            actual row group structure, use the CLI command
+            ``gpio check spatial --file`` or the standalone function
+            ``geoparquet_io.check_spatial_pushdown(file_path)``.
+
+        Returns:
+            CheckResult with pushdown readiness metrics
+
+        Example:
+            >>> table = gpio.read('data.parquet')
+            >>> result = table.check_spatial_pushdown()
+            >>> if result.passed():
+            ...     print("Good pushdown readiness")
+            >>> print(result.details())
+        """
+        from geoparquet_io.api.check import CheckResult
+        from geoparquet_io.core.check_spatial_order import check_spatial_pushdown_readiness
+
+        results = self._with_temp_file(
+            check_spatial_pushdown_readiness,
+            verbose=False,
+        )
+        return CheckResult(results, check_type="spatial_pushdown")
+
     def check_compression(self) -> CheckResult:
         """
         Check compression settings on geometry column.

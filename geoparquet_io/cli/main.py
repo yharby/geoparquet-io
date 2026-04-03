@@ -701,6 +701,38 @@ def check_spatial(
                     )
                 )
 
+        # Pushdown readiness metric
+        if show_output:
+            from geoparquet_io.core.check_spatial_order import check_spatial_pushdown_readiness
+
+            try:
+                pushdown = check_spatial_pushdown_readiness(
+                    file_path, verbose=verbose and show_output
+                )
+            except Exception as e:
+                if verbose:
+                    click.echo(f"  Debug: Pushdown check failed: {e}", err=True)
+                pushdown = {"has_geo_bbox": False}
+
+            click.echo("\nSpatial Filter Pushdown Readiness:")
+            if pushdown.get("has_geo_bbox"):
+                skip_pct = pushdown["estimated_skip_rate"] * 100
+                click.echo(f"  Row groups: {pushdown['num_row_groups']}")
+                click.echo(f"  Estimated skip rate: {skip_pct:.0f}%")
+                click.echo(f"  Avg bbox area ratio: {pushdown['avg_bbox_area_ratio']:.2f}")
+                if pushdown["passed"]:
+                    click.echo(click.style("  ✓ Good pushdown readiness", fg="green"))
+                else:
+                    click.echo(click.style("  ⚠️  Low pushdown efficiency", fg="yellow"))
+            else:
+                click.echo(
+                    click.style(
+                        "  ⚠️  No geo_bbox column found. "
+                        "Add bbox with 'gpio add bbox' for pushdown support.",
+                        fg="yellow",
+                    )
+                )
+
         # Record result for summary
         runner.record_result(file_path, result)
 
