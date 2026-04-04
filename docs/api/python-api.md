@@ -815,16 +815,19 @@ result = table.check_bloom_filters()
 details = result.to_dict()
 ```
 
-#### `explain_analyze(query=None, format='table')`
+#### `Table.explain_analyze(file_path, query=None)`
 
-Run DuckDB EXPLAIN ANALYZE on a query against the table's file.
+Run DuckDB EXPLAIN ANALYZE on a query against a Parquet file. This is a classmethod, not an instance method.
 
 ```python
-result = table.explain_analyze()
+result = Table.explain_analyze('data.parquet')
 print(result)
 
 # Custom query
-result = table.explain_analyze(query="SELECT * FROM read_parquet('{file}') WHERE id > 10")
+result = Table.explain_analyze(
+    'data.parquet',
+    query="SELECT * FROM read_parquet('{file}') WHERE id > 10"
+)
 ```
 
 #### `validate(version=None)`
@@ -1068,7 +1071,7 @@ pq.write_table(table, 'output.parquet')
 | `ops.from_wfs(service_url, typename, version='1.1.0', bbox=None, limit=None, max_workers=1)` | Fetch from WFS service |
 | `ops.get_row_group_geo_stats(parquet_file)` | Per-row-group geo bbox statistics |
 | `ops.compression_stats(path)` | Per-column compression ratios |
-| `ops.explain_analyze(parquet_file, query=None, format='table')` | DuckDB EXPLAIN ANALYZE query plan |
+| `ops.explain_analyze(file_path, query=None)` | DuckDB EXPLAIN ANALYZE query plan |
 
 ## Pipeline Composition
 
