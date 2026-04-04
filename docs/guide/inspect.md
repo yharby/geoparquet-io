@@ -82,7 +82,7 @@ Shows:
 
     ```bash
     # Column statistics (nulls, min/max, unique counts)
-    gpio inspect data.parquet --stats
+    gpio inspect stats data.parquet
 
     # Combine with preview
     gpio inspect data.parquet --head --stats
@@ -107,6 +107,28 @@ Shows:
     # Geometry columns have null counts only
     print(stats['geometry']['nulls'])
     ```
+
+### Compression Ratios
+
+`gpio inspect stats` also shows per-column compression ratios, including the compression codec, compressed and uncompressed sizes, and the compression ratio:
+
+=== "CLI"
+
+    ```bash
+    gpio inspect stats data.parquet
+    ```
+
+=== "Python"
+
+    ```python
+    from geoparquet_io.api import ops
+
+    stats = ops.compression_stats('data.parquet')
+    for col in stats:
+        print(f"{col['column']}: {col['compression']} ratio={col['ratio']:.2f}")
+    ```
+
+Output includes a "Compression Ratios" table showing which columns benefit most from compression.
 
 ## GeoParquet Metadata
 
@@ -191,6 +213,20 @@ This shows metadata from the Parquet specification for geospatial types:
 
 **Note:** This is different from `--geo-metadata` which shows GeoParquet metadata from the 'geo' key.
 
+## Bloom Filter Information
+
+`gpio inspect meta` includes a bloom filter summary section showing which columns have bloom filters, coverage percentages, and total bloom filter bytes:
+
+```bash
+# Bloom filter info is shown automatically
+gpio inspect meta data.parquet
+
+# JSON output includes bloom filter details
+gpio inspect meta data.parquet --json
+```
+
+Bloom filters enable efficient point lookups on low-cardinality columns. DuckDB 1.5+ automatically writes bloom filters when creating Parquet files.
+
 ## Per-Row-Group Geo Statistics
 
 View bounding box statistics for each row group to verify spatial locality:
@@ -211,7 +247,7 @@ View bounding box statistics for each row group to verify spatial locality:
 === "Python"
 
     ```python
-    from geoparquet_io import get_row_group_geo_stats
+    from geoparquet_io.api.ops import get_row_group_geo_stats
 
     stats = get_row_group_geo_stats('hilbert_sorted.parquet')
 
