@@ -32,7 +32,7 @@ This will show all available options for the `inspect` command.
 ### inspect meta Options
 
 - `--geo-stats` - Show per-row-group geo_bbox bounding box statistics
-- `--row-groups N` - Limit geo-stats to first N row groups
+- `--row-groups N` - Number of row groups to display (default: 1)
 - `--json` - Output as JSON
 
 ## Examples
