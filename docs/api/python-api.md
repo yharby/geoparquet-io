@@ -785,6 +785,48 @@ row_group_result = table.check_row_groups()
 details = result.to_dict()
 ```
 
+#### `check_optimization()`
+
+Evaluate spatial query optimization across five factors (native geo types, geo bbox stats, spatial sorting, row group size, ZSTD compression). Returns a score from 0 to 5.
+
+```python
+result = table.check_optimization()
+details = result.to_dict()
+print(f"Score: {details['score']}/5 - {details['level']}")
+```
+
+#### `check_spatial_pushdown()`
+
+Check spatial filter pushdown readiness by analyzing row group bounding box overlap.
+
+```python
+result = table.check_spatial_pushdown()
+details = result.to_dict()
+print(f"Skip rate: {details['estimated_skip_rate']}")
+print(f"Bbox area ratio: {details['avg_bbox_area_ratio']}")
+```
+
+#### `check_bloom_filters()`
+
+Check bloom filter presence across columns.
+
+```python
+result = table.check_bloom_filters()
+details = result.to_dict()
+```
+
+#### `explain_analyze(query=None, format='table')`
+
+Run DuckDB EXPLAIN ANALYZE on a query against the table's file.
+
+```python
+result = table.explain_analyze()
+print(result)
+
+# Custom query
+result = table.explain_analyze(query="SELECT * FROM read_parquet('{file}') WHERE id > 10")
+```
+
 #### `validate(version=None)`
 
 Validate against GeoParquet specification.
@@ -1023,6 +1065,10 @@ pq.write_table(table, 'output.parquet')
 | `ops.convert_to_flatgeobuf(table, output)` | Convert to FlatGeobuf |
 | `ops.convert_to_csv(table, output, include_wkt=True, include_bbox=True)` | Convert to CSV |
 | `ops.convert_to_shapefile(table, output, encoding='UTF-8', overwrite=False)` | Convert to Shapefile |
+| `ops.from_wfs(service_url, typename, version='1.1.0', bbox=None, limit=None, max_workers=1)` | Fetch from WFS service |
+| `ops.get_row_group_geo_stats(parquet_file)` | Per-row-group geo bbox statistics |
+| `ops.compression_stats(path)` | Per-column compression ratios |
+| `ops.explain_analyze(parquet_file, query=None, format='table')` | DuckDB EXPLAIN ANALYZE query plan |
 
 ## Pipeline Composition
 
@@ -1192,7 +1238,7 @@ if result:
 Inspect per-row-group bounding box statistics to verify spatial locality:
 
 ```python
-from geoparquet_io import get_row_group_geo_stats
+from geoparquet_io.api.ops import get_row_group_geo_stats
 
 # Get stats for each row group
 stats = get_row_group_geo_stats('hilbert_sorted.parquet')
